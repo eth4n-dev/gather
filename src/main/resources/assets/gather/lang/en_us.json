@@ -1,0 +1,13 @@
+{
+  "screen.gather.menu": "Gather",
+  "gui.gather.search": "Search items...",
+  "gui.gather.needed": "Needed",
+  "gui.gather.have": "Have",
+  "gui.gather.craft": "Craft",
+  "gui.gather.breakdown_depth": "Depth",
+  "gui.gather.breakdown_all": "Break All",
+  "gui.gather.no_items": "No items in list",
+  "gui.gather.no_results": "No results",
+  "key.gather.open_menu": "Open Gather",
+  "key.categories.gather": "Gather"
+}

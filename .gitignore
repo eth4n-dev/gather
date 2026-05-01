@@ -1,0 +1,27 @@
+# Gradle / build outputs
+.gradle/
+build/
+
+# Java / JVM artifacts
+*.class
+*.jar
+*.war
+*.ear
+!gradle/wrapper/gradle-wrapper.jar
+hs_err_pid*
+replay_pid*
+
+# Minecraft / Fabric runtime outputs
+run/
+logs/
+crash-reports/
+
+# Generated scratch classes from local experiments
+net/
+
+# IDE / OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "com.gather.client.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "HandledScreenAccessor",
+    "ItemEntityMixin",
+    "UseBlockMixin",
+    "WorldRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
