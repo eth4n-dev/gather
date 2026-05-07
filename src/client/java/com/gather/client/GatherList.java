@@ -7,6 +7,7 @@ import java.util.UUID;
 public class GatherList {
     public String id   = UUID.randomUUID().toString();
     public String name = "List";
+    public boolean hudHidden = false;
     public List<ListNode> nodes      = new ArrayList<>();
     public List<ListNode> savedGoals = new ArrayList<>();
 

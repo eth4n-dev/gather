@@ -17,11 +17,15 @@ import java.util.List;
 
 public class GatherScanSettingsScreen extends Screen {
 
+    private static final int[] REFRESH_PRESETS = {15, 30, 45, 60, 120};
+    private static final String[] REFRESH_LABELS = {"15s", "30s", "45s", "1m", "2m"};
+
     private final Screen parent;
     private ButtonWidget scanAllBtn;
     private ButtonWidget markBtn;
     private ButtonWidget clearAutoBtn;
     private ButtonWidget clearManualBtn;
+    private ButtonWidget refreshIntervalBtn;
     private int markFeedbackTicks = 0;
     private List<Text> hoveredTooltipLines = null;
     private int tooltipX, tooltipY;
@@ -47,33 +51,63 @@ public class GatherScanSettingsScreen extends Screen {
         }).dimensions(cx - 100, cy - 35, 200, 20).build();
         addDrawableChild(scanAllBtn);
 
+        addDrawableChild(ButtonWidget.builder(scanToggleKeybindLabel(), btn ->
+                client.setScreen(new GatherScanKeybindScreen(this)))
+                .dimensions(cx - 100, cy - 10, 200, 20).build());
+
         markBtn = ButtonWidget.builder(Text.literal("Mark Nearby Chests (5x5 chunks)"), btn -> {
             GatherClientNetworking.forceMarkNearby();
             markFeedbackTicks = 60;
             btn.setMessage(Text.literal("Marked! Run Scan All to apply."));
-        }).dimensions(cx - 100, cy - 10, 200, 20).build();
+        }).dimensions(cx - 100, cy + 15, 200, 20).build();
         addDrawableChild(markBtn);
 
         clearAutoBtn = ButtonWidget.builder(Text.literal("Clear Scan All Chests"), btn -> {
             GatherState.get().clearTrackedChests();
             GatherHud.markDirty();
             WorldHighlightRenderer.invalidateCache();
-        }).dimensions(cx - 100, cy + 15, 200, 20).build();
+        }).dimensions(cx - 100, cy + 40, 200, 20).build();
         addDrawableChild(clearAutoBtn);
 
         clearManualBtn = ButtonWidget.builder(Text.literal("Clear Manual Chests"), btn -> {
             GatherState.get().clearManualChests();
             GatherHud.markDirty();
             WorldHighlightRenderer.invalidateCache();
-        }).dimensions(cx - 100, cy + 40, 200, 20).build();
+        }).dimensions(cx - 100, cy + 65, 200, 20).build();
         addDrawableChild(clearManualBtn);
 
+        refreshIntervalBtn = ButtonWidget.builder(refreshIntervalLabel(), btn -> {
+            GatherSettings s = GatherSettings.get();
+            int cur = s.chestFallbackRefreshSeconds;
+            int next = REFRESH_PRESETS[0];
+            for (int i = 0; i < REFRESH_PRESETS.length - 1; i++) {
+                if (cur == REFRESH_PRESETS[i]) { next = REFRESH_PRESETS[i + 1]; break; }
+            }
+            s.chestFallbackRefreshSeconds = next;
+            s.save();
+            btn.setMessage(refreshIntervalLabel());
+        }).dimensions(cx - 100, cy + 90, 200, 20).build();
+        addDrawableChild(refreshIntervalBtn);
+
         addDrawableChild(ButtonWidget.builder(Text.literal("Done"), btn -> close())
-                .dimensions(cx - 50, cy + 70, 100, 20).build());
+                .dimensions(cx - 50, cy + 120, 100, 20).build());
     }
 
     private Text scanAllLabel() {
         return Text.literal("Scan All: " + (GatherSettings.get().countChests ? "ON" : "OFF"));
+    }
+
+    private Text scanToggleKeybindLabel() {
+        return Text.literal("Manual Scan Key: " + GatherScanKeybindScreen.buildComboLabel(GatherSettings.get()));
+    }
+
+    private Text refreshIntervalLabel() {
+        int cur = GatherSettings.get().chestFallbackRefreshSeconds;
+        String label = cur + "s";
+        for (int i = 0; i < REFRESH_PRESETS.length; i++) {
+            if (REFRESH_PRESETS[i] == cur) { label = REFRESH_LABELS[i]; break; }
+        }
+        return Text.literal("Fallback Refresh: " + label);
     }
 
     @Override
@@ -87,7 +121,7 @@ public class GatherScanSettingsScreen extends Screen {
         int cx = width / 2;
         int cy = height / 2;
         ctx.drawCenteredTextWithShadow(textRenderer, title, cx, cy - 82, 0xFFCCDDFF);
-        drawStatus(ctx, cx, cy - 65);
+        drawStatus(ctx, cx, cy - 68);
         super.render(ctx, mx, my, delta);
         drawHoverInfo(mx, my);
         if (hoveredTooltipLines != null) ctx.drawTooltip(textRenderer, hoveredTooltipLines, tooltipX, tooltipY);
@@ -115,10 +149,10 @@ public class GatherScanSettingsScreen extends Screen {
         ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(mode), cx, y, 0xFF88BBFF);
         ctx.drawCenteredTextWithShadow(textRenderer,
                 Text.literal("Scan All: " + auto + " (" + autoLoaded + " loaded, " + autoUnloaded + " saved away)"),
-                cx, y + 12, auto == 0 ? 0xFF667788 : 0xFF55CCAA);
+                cx, y + 10, auto == 0 ? 0xFF667788 : 0xFF55CCAA);
         ctx.drawCenteredTextWithShadow(textRenderer,
                 Text.literal("Manual: " + manual + " (" + manualLoaded + " loaded, " + manualUnloaded + " saved away)"),
-                cx, y + 24, manual == 0 ? 0xFF667788 : 0xFFFFAA44);
+                cx, y + 21, manual == 0 ? 0xFF667788 : 0xFFFFAA44);
     }
 
     private int countUnloadedManualChests(GatherState state, ClientWorld world) {
@@ -136,27 +170,41 @@ public class GatherScanSettingsScreen extends Screen {
         if (inside(mx, my, cx - 100, cy - 35, 200, 20)) {
             hoveredTooltipLines = List.of(
                     Text.literal("ON: automatically tracks opened containers nearby."),
-                    Text.literal("OFF: Shift+G manual tagging controls what counts."),
+                    Text.literal("OFF: manual tagging controls what counts."),
                     Text.literal("Saved far-away chests still count from last known contents."));
             tooltipX = mx;
             tooltipY = my + 18;
         } else if (inside(mx, my, cx - 100, cy - 10, 200, 20)) {
+            hoveredTooltipLines = List.of(
+                    Text.literal("Configure the key combo that toggles manual scan mode."),
+                    Text.literal("Supports modifier keys (Shift/Ctrl/Alt) plus any key."));
+            tooltipX = mx;
+            tooltipY = my + 18;
+        } else if (inside(mx, my, cx - 100, cy + 15, 200, 20)) {
             hoveredTooltipLines = List.of(
                     Text.literal("Marks all containers in the 5x5 chunks around you"),
                     Text.literal("as visited so Scan All can read their contents."),
                     Text.literal("Chunks must be loaded. Loot-table chests skipped at scan time."));
             tooltipX = mx;
             tooltipY = my + 18;
-        } else if (inside(mx, my, cx - 100, cy + 15, 200, 20)) {
+        } else if (inside(mx, my, cx - 100, cy + 40, 200, 20)) {
             hoveredTooltipLines = List.of(
                     Text.literal("Removes all Scan All tracked chest positions"),
                     Text.literal("and their saved contents for this world."));
             tooltipX = mx;
             tooltipY = my + 18;
-        } else if (inside(mx, my, cx - 100, cy + 40, 200, 20)) {
+        } else if (inside(mx, my, cx - 100, cy + 65, 200, 20)) {
             hoveredTooltipLines = List.of(
                     Text.literal("Removes all manually tagged chest positions"),
                     Text.literal("and their saved contents for this world."));
+            tooltipX = mx;
+            tooltipY = my + 18;
+        } else if (inside(mx, my, cx - 100, cy + 90, 200, 20)) {
+            hoveredTooltipLines = List.of(
+                    Text.literal("How often Gather re-reads chest contents as a fallback."),
+                    Text.literal("Chest opens update instantly via dirty events."),
+                    Text.literal("This covers hopper/dispenser changes and missed events."),
+                    Text.literal("Chests are refreshed gradually, not all at once."));
             tooltipX = mx;
             tooltipY = my + 18;
         }

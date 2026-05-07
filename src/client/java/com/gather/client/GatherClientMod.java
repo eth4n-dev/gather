@@ -2,6 +2,7 @@ package com.gather.client;
 
 import com.gather.client.screen.GatherHelpScreen;
 import com.gather.client.screen.GatherMenuScreen;
+import com.gather.client.screen.GatherTutorialScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -21,12 +22,19 @@ import java.util.stream.Collectors;
 
 public class GatherClientMod implements ClientModInitializer {
 
+    private static final java.util.Map<String, Item> ITEM_LOOKUP_CACHE = new java.util.HashMap<>();
+
     private int autoSyncTimer     = 0;
     private int chestRefreshTimer = 0;
+    private int fallbackRefreshIndex = 0;
     private boolean pendingHelpScreen = false;
+    private long lastAutoTrackChunkKey = Long.MIN_VALUE;
+    private int autoTrackFallbackCount = 0;
+    private List<String> lastCollectorTargets = new java.util.ArrayList<>();
 
     @Override
     public void onInitializeClient() {
+        GatherState.migrateAllToSubdir();
         GatherKeyBindings.register();
         GatherClientNetworking.register();
         GatherHud.register();
@@ -49,28 +57,33 @@ public class GatherClientMod implements ClientModInitializer {
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             GatherState.unload();
+            GatherHud.reset();
             pendingHelpScreen = false;
+            lastCollectorTargets = new java.util.ArrayList<>();
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            GatherState.flushPendingSaveIfDue();
+
             if (pendingHelpScreen && client.player != null && client.currentScreen == null) {
                 pendingHelpScreen = false;
-                client.setScreen(new GatherHelpScreen(null, true));
+                client.setScreen(new GatherTutorialScreen());
             }
 
             while (GatherKeyBindings.openMenu.wasPressed()) {
                 if (client.player == null) return;
+                if (client.currentScreen == null) {
+                    client.setScreen(new GatherMenuScreen());
+                }
+            }
+
+            while (GatherKeyBindings.manualScanToggle.wasPressed()) {
+                if (client.player == null) return;
+                GatherSettings cfg = GatherSettings.get();
                 long handle = client.getWindow().getHandle();
-                boolean shiftDown = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS
-                                 || GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
-                if (shiftDown && client.currentScreen == null) {
-                    if (!GatherSettings.get().enabled) return;
-                    if (GatherSettings.get().countChests) return;
-                    // Shift+G: toggle chest scan mode
+                if (scanModifiersHeld(cfg, handle) && client.currentScreen == null && cfg.enabled && !cfg.countChests) {
                     GatherState s = GatherState.get();
                     s.setChestScanMode(!s.isChestScanMode());
-                } else {
-                    client.setScreen(new GatherMenuScreen());
                 }
             }
 
@@ -81,22 +94,44 @@ public class GatherClientMod implements ClientModInitializer {
             if (++chestRefreshTimer >= 40) {
                 chestRefreshTimer = 0;
                 List<String> collectorTargets = state.getChestScanTargets(itemId -> 0);
-                GatherClientNetworking.updateCollectorTargets(collectorTargets);
+                if (!collectorTargets.equals(lastCollectorTargets)) {
+                    lastCollectorTargets = new java.util.ArrayList<>(collectorTargets);
+                    GatherClientNetworking.updateCollectorTargets(collectorTargets);
+                }
                 if (GatherSettings.get().countChests) {
-                    List<String> targets = state.getChestScanTargets(itemId -> {
-                        Item item = Registries.ITEM.get(Identifier.of(itemId));
-                        return item == null ? 0 : GatherHud.countInventoryTagAware(client, item);
-                    });
-                    GatherClientNetworking.requestAutoTrack(GatherSettings.get().chestScanRadius, targets);
+                    long ck = chunkKey(client.player.getBlockPos());
+                    autoTrackFallbackCount++;
+                    if (ck != lastAutoTrackChunkKey || autoTrackFallbackCount >= 15) {
+                        lastAutoTrackChunkKey = ck;
+                        autoTrackFallbackCount = 0;
+                        List<String> targets = state.getChestScanTargets(itemId -> {
+                            Item item = Registries.ITEM.get(Identifier.of(itemId));
+                            return item == null ? 0 : GatherHud.countInventoryTagAware(client, item);
+                        });
+                        GatherClientNetworking.requestAutoTrack(GatherSettings.get().chestScanRadius, targets);
+                    }
                 }
-                // Refresh auto chests when Scan All is on; manual chests only count when Scan All is off.
-                Set<Long> allChests = new HashSet<>(state.getTrackedChests());
-                if (!GatherSettings.get().countChests) {
-                    allChests.addAll(state.getManualChests());
-                }
-                Set<Long> nearbyLoadedChests = filterNearbyLoadedChests(client, allChests);
-                if (!nearbyLoadedChests.isEmpty()) {
-                    GatherClientNetworking.requestTrackedChests(nearbyLoadedChests);
+                // Staggered lazy fallback: spread chest refreshes evenly over chestFallbackRefreshSeconds
+                List<Long> allChestList = new java.util.ArrayList<>(state.getTrackedChests());
+                if (!GatherSettings.get().countChests) allChestList.addAll(state.getManualChests());
+                if (!allChestList.isEmpty()) {
+                    int total = allChestList.size();
+                    if (fallbackRefreshIndex >= total) fallbackRefreshIndex = 0;
+                    int refreshSec = GatherSettings.get().chestFallbackRefreshSeconds;
+                    int cyclesPerFullRefresh = Math.max(1, refreshSec / 2);
+                    int batchSize = Math.max(1, (total + cyclesPerFullRefresh - 1) / cyclesPerFullRefresh);
+                    Set<Long> batch = new HashSet<>();
+                    for (int i = 0; i < batchSize; i++) {
+                        long pos = allChestList.get(fallbackRefreshIndex);
+                        fallbackRefreshIndex = (fallbackRefreshIndex + 1) % total;
+                        BlockPos bp = BlockPos.fromLong(pos);
+                        if (client.world != null && client.world.isChunkLoaded(bp.getX() >> 4, bp.getZ() >> 4)) {
+                            batch.add(pos);
+                        }
+                    }
+                    if (!batch.isEmpty()) GatherClientNetworking.requestTrackedChests(batch);
+                } else {
+                    fallbackRefreshIndex = 0;
                 }
             }
 
@@ -104,7 +139,7 @@ public class GatherClientMod implements ClientModInitializer {
             autoSyncTimer = 0;
 
             java.util.function.Function<String, Integer> totalCounter = itemId -> {
-                Item it = Registries.ITEM.get(Identifier.of(itemId));
+                Item it = ITEM_LOOKUP_CACHE.computeIfAbsent(itemId, k -> Registries.ITEM.get(Identifier.of(k)));
                 int count = it == null ? 0 : GatherHud.countInventoryTagAware(client, it);
                 if (GatherSettings.get().countChests) {
                     count += GatherState.get().getTrackedChestCountMatching(itemId);
@@ -119,20 +154,18 @@ public class GatherClientMod implements ClientModInitializer {
         });
     }
 
-    private static Set<Long> filterNearbyLoadedChests(net.minecraft.client.MinecraftClient client, Set<Long> chests) {
-        if (client.player == null || client.world == null || chests.isEmpty()) return Set.of();
-        BlockPos playerPos = client.player.getBlockPos();
-        int playerChunkX = playerPos.getX() >> 4;
-        int playerChunkZ = playerPos.getZ() >> 4;
-        Set<Long> result = new HashSet<>();
-        for (long encoded : chests) {
-            BlockPos pos = BlockPos.fromLong(encoded);
-            int chunkX = pos.getX() >> 4;
-            int chunkZ = pos.getZ() >> 4;
-            if (Math.abs(chunkX - playerChunkX) > 1 || Math.abs(chunkZ - playerChunkZ) > 1) continue;
-            if (!client.world.isChunkLoaded(chunkX, chunkZ)) continue;
-            result.add(encoded);
-        }
-        return result;
+    public static boolean scanModifiersHeld(GatherSettings cfg, long handle) {
+        if (cfg.scanToggleShift && GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_SHIFT) != GLFW.GLFW_PRESS
+                && GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_SHIFT) != GLFW.GLFW_PRESS) return false;
+        if (cfg.scanToggleCtrl && GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) != GLFW.GLFW_PRESS
+                && GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) != GLFW.GLFW_PRESS) return false;
+        if (cfg.scanToggleAlt && GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_ALT) != GLFW.GLFW_PRESS
+                && GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_ALT) != GLFW.GLFW_PRESS) return false;
+        return true;
     }
+
+    private static long chunkKey(BlockPos p) {
+        return ((long)(p.getX() >> 4) << 32) | ((p.getZ() >> 4) & 0xFFFFFFFFL);
+    }
+
 }

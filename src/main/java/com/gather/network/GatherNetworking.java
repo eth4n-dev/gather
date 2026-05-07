@@ -3,7 +3,10 @@ package com.gather.network;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import com.gather.mixin.ShulkerBoxScreenHandlerAccessor;
+import com.gather.GatherServerConfig;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.entity.ItemEntity;
@@ -26,6 +29,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.registry.Registries;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.screen.ShulkerBoxScreenHandler;
@@ -54,10 +58,16 @@ import java.nio.file.Path;
 public class GatherNetworking {
 
     private static final Map<UUID, Set<String>> COLLECTOR_TARGETS = new HashMap<>();
+    private static final Map<Item, String> ITEM_ID_STR_CACHE = new HashMap<>();
     private static final Map<UUID, CollectorPlacement> PENDING_COLLECTOR_PLACEMENTS = new HashMap<>();
     private static final Map<Long, CollectorPlacement> PLACED_COLLECTOR_CONFIGS = new HashMap<>();
     private static final Map<UUID, PendingBreak> PENDING_COLLECTOR_BREAKS = new HashMap<>();
+    private static final Map<UUID, Integer> PENDING_COLLECTOR_SYNC = new HashMap<>();
+    private static final Map<UUID, Long> LAST_CHEST_SCAN_MS = new HashMap<>();
+    private static final Map<UUID, Long> LAST_AUTO_TRACK_MS = new HashMap<>();
+    private static final long CHEST_SCAN_COOLDOWN_MS = 1500L;
     private static int collectorTick = 0;
+    private static int collectorWarmCursor = 0;
 
     private record CollectorPlacement(BlockPos pos, boolean allMode, List<String> items, boolean leaveOne) {}
     private record PendingBreak(BlockPos pos, boolean allMode, List<String> items, boolean leaveOne, int ticksLeft) {}
@@ -88,8 +98,51 @@ public class GatherNetworking {
         PayloadTypeRegistry.playS2C().register(BreakdownResultPayload.ID, BreakdownResultPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(TrackedChestResultPayload.ID, TrackedChestResultPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(AutoTrackResultPayload.ID, AutoTrackResultPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(PlacedCollectorPositionsPayload.ID, PlacedCollectorPositionsPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(ChestDirtyPayload.ID, ChestDirtyPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(XrayPermissionPayload.ID, XrayPermissionPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(XrayCommandPayload.ID, XrayCommandPayload.CODEC);
+
+        ServerLifecycleEvents.SERVER_STARTED.register(GatherServerConfig::load);
+
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            ServerPlayerEntity p = handler.player;
+            boolean xrayAllowed = !server.isDedicated() || GatherServerConfig.isXrayAllowed();
+            ServerPlayNetworking.send(p, new XrayPermissionPayload(xrayAllowed));
+            if (p.getEntityWorld() instanceof ServerWorld sw) {
+                warmCollectorCacheForPlayer(p, sw);
+                ServerPlayNetworking.send(p, buildCollectorPayloadFor(p, sw));
+                PENDING_COLLECTOR_SYNC.put(p.getUuid(), 20);
+            }
+        });
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            UUID playerId = handler.player.getUuid();
+            COLLECTOR_TARGETS.remove(playerId);
+            PENDING_COLLECTOR_PLACEMENTS.remove(playerId);
+            PENDING_COLLECTOR_BREAKS.remove(playerId);
+            PENDING_COLLECTOR_SYNC.remove(playerId);
+            LAST_CHEST_SCAN_MS.remove(playerId);
+            LAST_AUTO_TRACK_MS.remove(playerId);
+        });
 
         ServerTickEvents.END_SERVER_TICK.register(server -> {
+            if (!PENDING_COLLECTOR_SYNC.isEmpty()) {
+                var syncIt = PENDING_COLLECTOR_SYNC.entrySet().iterator();
+                while (syncIt.hasNext()) {
+                    var entry = syncIt.next();
+                    int left = entry.getValue() - 1;
+                    if (left > 0) {
+                        entry.setValue(left);
+                        continue;
+                    }
+                    ServerPlayerEntity p = server.getPlayerManager().getPlayer(entry.getKey());
+                    if (p != null && p.getEntityWorld() instanceof ServerWorld sw) {
+                        ServerPlayNetworking.send(p, buildCollectorPayloadFor(p, sw));
+                    }
+                    syncIt.remove();
+                }
+            }
+
             // Apply collector config to shulkers that were just placed this tick
             if (!PENDING_COLLECTOR_PLACEMENTS.isEmpty()) {
                 var it = PENDING_COLLECTOR_PLACEMENTS.entrySet().iterator();
@@ -98,9 +151,11 @@ public class GatherNetworking {
                     it.remove();
                     ServerPlayerEntity p = server.getPlayerManager().getPlayer(entry.getKey());
                     if (p == null) continue;
-                    BlockEntity be = ((ServerWorld) p.getEntityWorld()).getBlockEntity(entry.getValue().pos());
+                    ServerWorld sw = (ServerWorld) p.getEntityWorld();
+                    BlockEntity be = sw.getBlockEntity(entry.getValue().pos());
                     if (be instanceof ShulkerBoxBlockEntity shulker) {
                         writeCollectorToBlockEntity(shulker, true, entry.getValue().allMode(), entry.getValue().items(), entry.getValue().leaveOne());
+                        broadcastCollectorPositions(server, sw);
                     }
                 }
             }
@@ -134,7 +189,19 @@ public class GatherNetworking {
                 }
             }
 
-            if (++collectorTick % 10 != 0) return;
+            collectorTick++;
+
+            // Stagger collector cache re-warms so chunk scans do not bunch onto one tick.
+            if (collectorTick % 10 == 0) {
+                List<ServerPlayerEntity> players = server.getPlayerManager().getPlayerList();
+                if (!players.isEmpty()) {
+                    if (collectorWarmCursor >= players.size()) collectorWarmCursor = 0;
+                    ServerPlayerEntity p = players.get(collectorWarmCursor++);
+                    if (p.getEntityWorld() instanceof ServerWorld sw) warmCollectorCacheForPlayer(p, sw);
+                }
+            }
+
+            if (collectorTick % 10 != 0) return;
             for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
                 Set<String> targets = COLLECTOR_TARGETS.getOrDefault(player.getUuid(), Set.of());
                 if (!targets.isEmpty()) collectIntoCarriedCollectors(player, targets);
@@ -147,12 +214,32 @@ public class GatherNetworking {
             }
             BlockEntity be = serverWorld.getBlockEntity(hitResult.getBlockPos());
             if (be instanceof Inventory) {
-                OpenedContainers.mark(serverWorld, canonicalContainerPos(serverWorld, hitResult.getBlockPos()));
+                BlockPos canonPos = canonicalContainerPos(serverWorld, hitResult.getBlockPos());
+                OpenedContainers.mark(serverWorld, canonPos);
                 BlockPos partner = doubleChestPartner(serverWorld, hitResult.getBlockPos());
                 if (partner != null) OpenedContainers.mark(serverWorld, partner);
+                // Broadcast dirty so clients refresh this chest's contents immediately
+                ChestDirtyPayload dirty = new ChestDirtyPayload(canonPos.asLong());
+                for (ServerPlayerEntity gp : serverWorld.getServer().getPlayerManager().getPlayerList()) {
+                    ServerPlayNetworking.send(gp, dirty);
+                }
+            }
+            ItemStack held = player.getStackInHand(hand);
+            // When placing a chest, dirty any adjacent tracked chest so double-chest bounds update immediately
+            if (be == null && held.getItem() instanceof BlockItem blockItem && blockItem.getBlock() instanceof ChestBlock) {
+                BlockPos placementPos = hitResult.getBlockPos().offset(hitResult.getSide());
+                for (Direction dir : Direction.Type.HORIZONTAL) {
+                    BlockPos neighbor = placementPos.offset(dir);
+                    if (!serverWorld.isChunkLoaded(neighbor.getX() >> 4, neighbor.getZ() >> 4)) continue;
+                    if (!(serverWorld.getBlockEntity(neighbor) instanceof Inventory)) continue;
+                    if (!OpenedContainers.contains(serverWorld, neighbor)) continue;
+                    ChestDirtyPayload dirtyNeighbor = new ChestDirtyPayload(neighbor.asLong());
+                    for (ServerPlayerEntity gp : serverWorld.getServer().getPlayerManager().getPlayerList()) {
+                        ServerPlayNetworking.send(gp, dirtyNeighbor);
+                    }
+                }
             }
             // If player is placing a collector-enabled shulker, schedule config write for next tick
-            ItemStack held = player.getStackInHand(hand);
             if (isShulkerBox(held) && isCollectorEnabled(held) && be == null) {
                 BlockPos placementPos = hitResult.getBlockPos().offset(hitResult.getSide());
                 PENDING_COLLECTOR_PLACEMENTS.put(player.getUuid(),
@@ -164,6 +251,15 @@ public class GatherNetworking {
         // After break: get config from Phase A cache (most reliable) or blockEntity fallback, schedule item write
         PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, blockEntity) -> {
             if (world.isClient()) return;
+            // Notify clients if a tracked container was broken so outlines update immediately
+            if (world instanceof ServerWorld sw && blockEntity instanceof Inventory) {
+                if (OpenedContainers.contains(sw, pos)) {
+                    ChestDirtyPayload dirty = new ChestDirtyPayload(pos.asLong());
+                    for (ServerPlayerEntity gp : sw.getServer().getPlayerManager().getPlayerList()) {
+                        ServerPlayNetworking.send(gp, dirty);
+                    }
+                }
+            }
             // Primary: Phase A has already successfully read CUSTOM_DATA from this pos
             CollectorPlacement cached = PLACED_COLLECTOR_CONFIGS.remove(pos.asLong());
             CollectorPlacement config = cached;
@@ -182,10 +278,27 @@ public class GatherNetworking {
             if (config == null) return;
             PENDING_COLLECTOR_BREAKS.put(player.getUuid(),
                     new PendingBreak(pos, config.allMode(), config.items(), config.leaveOne(), 5));
+            if (world instanceof ServerWorld sw) broadcastCollectorPositions(sw.getServer(), sw);
+        });
+
+        ServerPlayNetworking.registerGlobalReceiver(XrayCommandPayload.ID, (payload, context) -> {
+            ServerPlayerEntity player = context.player();
+            boolean isOp = !context.server().isDedicated()
+                    || context.server().getPlayerManager().isOperator(
+                            new net.minecraft.server.PlayerConfigEntry(player.getGameProfile()));
+            if (!isOp) {
+                player.sendMessage(net.minecraft.text.Text.literal("[Gather] You need OP (level 2) to change xray settings."));
+                return;
+            }
+            boolean value = payload.enable();
+            GatherServerConfig.setXray(value);
+            broadcastXrayPermission(context.server(), value);
+            player.sendMessage(net.minecraft.text.Text.literal("[Gather] Xray " + (value ? "enabled" : "disabled") + " for all players."));
         });
 
         ServerPlayNetworking.registerGlobalReceiver(ChestScanRequestPayload.ID, (payload, context) -> {
             ServerPlayerEntity player = context.player();
+            if (isRateLimited(LAST_CHEST_SCAN_MS, player.getUuid(), CHEST_SCAN_COOLDOWN_MS)) return;
             ServerWorld world = (ServerWorld) player.getEntityWorld();
             int radius = Math.min(payload.radius(), 256);
 
@@ -226,7 +339,9 @@ public class GatherNetworking {
                 int chunkZ = pos.getZ() >> 4;
                 if (!world.isChunkLoaded(chunkX, chunkZ)) continue;
                 BlockEntity be = world.getBlockEntity(pos);
-                if (isTrackableContainer(world, be) && be instanceof Inventory inv) {
+                if (isCollectorEnabled(be) && be instanceof Inventory inv) {
+                    counts.put(encoded, snapshotInventory(inv));
+                } else if (isTrackableContainer(world, be) && be instanceof Inventory inv) {
                     counts.put(encoded, snapshotLogicalContainer(world, pos, inv));
                 } else {
                     counts.put(encoded, Map.of());
@@ -237,6 +352,7 @@ public class GatherNetworking {
 
         ServerPlayNetworking.registerGlobalReceiver(AutoTrackRequestPayload.ID, (payload, context) -> {
             ServerPlayerEntity player = context.player();
+            if (isRateLimited(LAST_AUTO_TRACK_MS, player.getUuid(), CHEST_SCAN_COOLDOWN_MS)) return;
             ServerWorld world = (ServerWorld) player.getEntityWorld();
             int radius = Math.min(payload.radius(), 256);
             List<Long> positions = new ArrayList<>();
@@ -309,6 +425,8 @@ public class GatherNetworking {
                     handler.sendContentUpdates();
                 }
                 sendOpenCollectorState(player);
+                ServerWorld sw = (ServerWorld) player.getEntityWorld();
+                broadcastCollectorPositions(sw.getServer(), sw);
             } else {
                 ItemStack backingStack = findOpenShulkerStack(player, inventory);
                 if (backingStack.isEmpty()) {
@@ -386,29 +504,25 @@ public class GatherNetworking {
         boolean changed = false;
         ItemStack openBackingStack = ItemStack.EMPTY;
 
-        // Phase A: scan nearby placed shulker block entities (open or closed)
+        // Phase A: process only known placed collector shulkers from cache (no chunk scanning)
         if (player.getEntityWorld() instanceof ServerWorld world) {
             BlockPos center = player.getBlockPos();
             int chunkRadius = 4;
             int cx = center.getX() >> 4, cz = center.getZ() >> 4;
-            for (int dx = -chunkRadius; dx <= chunkRadius; dx++) {
-                for (int dz = -chunkRadius; dz <= chunkRadius; dz++) {
-                    if (!world.isChunkLoaded(cx + dx, cz + dz)) continue;
-                    for (BlockEntity be : world.getChunk(cx + dx, cz + dz).getBlockEntities().values()) {
-                        if (!(be instanceof ShulkerBoxBlockEntity shulker)) continue;
-                        NbtCompound nbt = shulker.getComponents()
-                                .getOrDefault(DataComponentTypes.CUSTOM_DATA, NbtComponent.DEFAULT).copyNbt();
-                        if (!nbt.getBoolean(COLLECTOR_ENABLED_KEY, false)) continue;
-                        boolean allMode = !COLLECTOR_MODE_CERTAIN.equals(nbt.getString(COLLECTOR_MODE_KEY, COLLECTOR_MODE_ALL));
-                        List<String> selected = splitLines(nbt.getString(COLLECTOR_ITEMS_KEY, ""));
-                        boolean lo = nbt.getBoolean(COLLECTOR_LEAVE_ONE_KEY, true);
-                        // Cache config by pos so AFTER handler can use it on break
-                        PLACED_COLLECTOR_CONFIGS.put(be.getPos().asLong(), new CollectorPlacement(be.getPos(), allMode, selected, lo));
-                        Set<String> targets = effectiveCollectorTargets(allMode, selected, liveTargets);
-                        if (!targets.isEmpty() && moveMatchingInventoryInto(player, shulker, targets, lo)) {
-                            changed = true;
-                        }
-                    }
+            for (var it = PLACED_COLLECTOR_CONFIGS.entrySet().iterator(); it.hasNext(); ) {
+                var entry = it.next();
+                BlockPos pos = BlockPos.fromLong(entry.getKey());
+                if (Math.abs((pos.getX() >> 4) - cx) > chunkRadius ||
+                    Math.abs((pos.getZ() >> 4) - cz) > chunkRadius) continue;
+                if (!world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) continue;
+                if (!(world.getBlockEntity(pos) instanceof ShulkerBoxBlockEntity shulker)) {
+                    it.remove();
+                    continue;
+                }
+                CollectorPlacement config = entry.getValue();
+                Set<String> targets = effectiveCollectorTargets(config.allMode(), config.items(), liveTargets);
+                if (!targets.isEmpty() && moveMatchingInventoryInto(player, shulker, targets, config.leaveOne())) {
+                    changed = true;
                 }
             }
         }
@@ -438,11 +552,14 @@ public class GatherNetworking {
             ItemStack collector = player.getInventory().getStack(slot);
             if (collector == openBackingStack) continue;
             if (!isShulkerBox(collector)) continue;
-            boolean enabled = isCollectorEnabled(collector);
-            if (!enabled) continue;
-            Set<String> targets = effectiveCollectorTargets(isCollectorAllMode(collector), readCollectorItems(collector), liveTargets);
+            NbtCompound nbt = enabledCollectorNbt(collector); // single copyNbt call
+            if (nbt == null) continue;
+            boolean allMode = !COLLECTOR_MODE_CERTAIN.equals(nbt.getString(COLLECTOR_MODE_KEY, COLLECTOR_MODE_ALL));
+            List<String> selectedItems = splitLines(nbt.getString(COLLECTOR_ITEMS_KEY, ""));
+            boolean lo = nbt.getBoolean(COLLECTOR_LEAVE_ONE_KEY, true);
+            Set<String> targets = effectiveCollectorTargets(allMode, selectedItems, liveTargets);
             if (targets.isEmpty()) continue;
-            boolean moved = moveMatchingInventoryIntoShulkerStack(player, slot, collector, targets, isCollectorLeaveOne(collector));
+            boolean moved = moveMatchingInventoryIntoShulkerStack(player, slot, collector, targets, lo);
             changed |= moved;
         }
 
@@ -458,10 +575,70 @@ public class GatherNetworking {
         return result;
     }
 
+    private static boolean isRateLimited(Map<UUID, Long> lastSeenMs, UUID playerId, long cooldownMs) {
+        long now = System.currentTimeMillis();
+        Long last = lastSeenMs.get(playerId);
+        if (last != null && now - last < cooldownMs) return true;
+        lastSeenMs.put(playerId, now);
+        return false;
+    }
+
     private static Set<String> effectiveCollectorTargets(boolean allMode, List<String> selectedItems, Set<String> liveTargets) {
         if (allMode) return liveTargets;
         // Certain mode: collect exactly what was selected, regardless of gather goals
         return new HashSet<>(selectedItems);
+    }
+
+    public static void broadcastXrayPermission(net.minecraft.server.MinecraftServer server, boolean allowed) {
+        XrayPermissionPayload packet = new XrayPermissionPayload(allowed);
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            ServerPlayNetworking.send(p, packet);
+        }
+    }
+
+    public static void broadcastCollectorPositions(net.minecraft.server.MinecraftServer server, ServerWorld world) {
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (p.getEntityWorld() == world) {
+                ServerPlayNetworking.send(p, buildCollectorPayloadFor(p, world));
+            }
+        }
+    }
+
+    private static void warmCollectorCacheForPlayer(ServerPlayerEntity player, ServerWorld world) {
+        BlockPos center = player.getBlockPos();
+        int cx = center.getX() >> 4, cz = center.getZ() >> 4;
+        for (int dx = -6; dx <= 6; dx++) {
+            for (int dz = -6; dz <= 6; dz++) {
+                if (!world.isChunkLoaded(cx + dx, cz + dz)) continue;
+                for (BlockEntity be : world.getChunk(cx + dx, cz + dz).getBlockEntities().values()) {
+                    if (!(be instanceof ShulkerBoxBlockEntity shulker)) continue;
+                    NbtCompound nbt = shulker.getComponents()
+                            .getOrDefault(DataComponentTypes.CUSTOM_DATA, NbtComponent.DEFAULT).copyNbt();
+                    long key = be.getPos().asLong();
+                    if (!nbt.getBoolean(COLLECTOR_ENABLED_KEY, false)) {
+                        PLACED_COLLECTOR_CONFIGS.remove(key);
+                        continue;
+                    }
+                    boolean allMode = !COLLECTOR_MODE_CERTAIN.equals(nbt.getString(COLLECTOR_MODE_KEY, COLLECTOR_MODE_ALL));
+                    List<String> items = splitLines(nbt.getString(COLLECTOR_ITEMS_KEY, ""));
+                    boolean lo = nbt.getBoolean(COLLECTOR_LEAVE_ONE_KEY, true);
+                    PLACED_COLLECTOR_CONFIGS.put(key, new CollectorPlacement(be.getPos(), allMode, items, lo));
+                }
+            }
+        }
+    }
+
+    private static PlacedCollectorPositionsPayload buildCollectorPayloadFor(ServerPlayerEntity player, ServerWorld world) {
+        List<PlacedCollectorPositionsPayload.Entry> entries = new ArrayList<>();
+        BlockPos center = player.getBlockPos();
+        int cx = center.getX() >> 4, cz = center.getZ() >> 4;
+        for (var entry : PLACED_COLLECTOR_CONFIGS.entrySet()) {
+            BlockPos pos = BlockPos.fromLong(entry.getKey());
+            if (Math.abs((pos.getX() >> 4) - cx) > 6 || Math.abs((pos.getZ() >> 4) - cz) > 6) continue;
+            CollectorPlacement config = entry.getValue();
+            entries.add(new PlacedCollectorPositionsPayload.Entry(entry.getKey(), config.allMode(), config.items()));
+        }
+        return new PlacedCollectorPositionsPayload(entries);
     }
 
     private static void sendOpenCollectorState(ServerPlayerEntity player) {
@@ -506,6 +683,18 @@ public class GatherNetworking {
                 .build();
         shulker.setComponents(components);
         shulker.markDirty();
+        updatePlacedCollectorCache(shulker.getPos(), enabled, allMode, selectedItems, leaveOne);
+    }
+
+    private static void updatePlacedCollectorCache(BlockPos pos, boolean enabled,
+                                                   boolean allMode, List<String> selectedItems,
+                                                   boolean leaveOne) {
+        if (enabled) {
+            PLACED_COLLECTOR_CONFIGS.put(pos.asLong(),
+                    new CollectorPlacement(pos, allMode, List.copyOf(selectedItems), leaveOne));
+        } else {
+            PLACED_COLLECTOR_CONFIGS.remove(pos.asLong());
+        }
     }
 
     private static void writeCollectorToStack(ItemStack stack, boolean enabled, boolean allMode, List<String> selectedItems, boolean leaveOne) {
@@ -570,12 +759,25 @@ public class GatherNetworking {
 
     private static boolean moveMatchingInventoryInto(ServerPlayerEntity player, Inventory target, Set<String> targets, boolean leaveOne) {
         boolean changed = false;
+        Set<String> leftOneFor = leaveOne ? new HashSet<>() : null;
         for (int i = 0; i < player.getInventory().size(); i++) {
             ItemStack stack = player.getInventory().getStack(i);
+            if (stack.isEmpty() || isShulkerBox(stack) || !matchesTarget(stack, targets)) continue;
             boolean stackable = stack.getMaxCount() > 1;
-            if (stack.isEmpty() || (leaveOne && stackable && stack.getCount() <= 1) || isShulkerBox(stack) || !matchesTarget(stack, targets)) continue;
+            boolean effectiveLeaveOne = leaveOne && stackable;
+            if (effectiveLeaveOne) {
+                String id = ITEM_ID_STR_CACHE.computeIfAbsent(stack.getItem(), item -> Registries.ITEM.getId(item).toString());
+                if (leftOneFor.contains(id)) {
+                    effectiveLeaveOne = false; // already reserved 1 from an earlier stack
+                } else if (stack.getCount() <= 1) {
+                    leftOneFor.add(id); // this single item is the kept one
+                    continue;
+                } else {
+                    leftOneFor.add(id); // will keep 1 from this stack
+                }
+            }
             int before = stack.getCount();
-            insertIntoInventory(target, stack, leaveOne);
+            insertIntoInventory(target, stack, effectiveLeaveOne);
             if (stack.getCount() != before) changed = true;
         }
         if (changed) {
@@ -595,13 +797,26 @@ public class GatherNetworking {
         if (existing != null) existing.copyTo(contents);
 
         boolean changed = false;
+        Set<String> leftOneFor = leaveOne ? new HashSet<>() : null;
         for (int slot = 0; slot < player.getInventory().size(); slot++) {
             if (slot == collectorSlot) continue;
             ItemStack source = player.getInventory().getStack(slot);
+            if (source.isEmpty() || isShulkerBox(source) || !matchesTarget(source, targets)) continue;
             boolean stackable = source.getMaxCount() > 1;
-            if (source.isEmpty() || (leaveOne && stackable && source.getCount() <= 1) || isShulkerBox(source) || !matchesTarget(source, targets)) continue;
+            boolean effectiveLeaveOne = leaveOne && stackable;
+            if (effectiveLeaveOne) {
+                String id = ITEM_ID_STR_CACHE.computeIfAbsent(source.getItem(), item -> Registries.ITEM.getId(item).toString());
+                if (leftOneFor.contains(id)) {
+                    effectiveLeaveOne = false;
+                } else if (source.getCount() <= 1) {
+                    leftOneFor.add(id);
+                    continue;
+                } else {
+                    leftOneFor.add(id);
+                }
+            }
             int before = source.getCount();
-            insertIntoStacks(contents, source, leaveOne);
+            insertIntoStacks(contents, source, effectiveLeaveOne);
             if (source.getCount() != before) changed = true;
         }
 
@@ -661,8 +876,22 @@ public class GatherNetworking {
         return stack.getItem() instanceof BlockItem blockItem && blockItem.getBlock() instanceof ShulkerBoxBlock;
     }
 
+    /** Returns the collector NBT if enabled, null otherwise. Copies NBT exactly once. */
+    private static NbtCompound enabledCollectorNbt(ItemStack stack) {
+        NbtComponent cd = stack.get(DataComponentTypes.CUSTOM_DATA);
+        if (cd == null) return null;
+        NbtCompound nbt = cd.copyNbt();
+        return nbt.getBoolean(COLLECTOR_ENABLED_KEY, false) ? nbt : null;
+    }
+
     private static boolean isCollectorEnabled(ItemStack stack) {
         NbtComponent customData = stack.get(DataComponentTypes.CUSTOM_DATA);
+        return customData != null && customData.copyNbt().getBoolean(COLLECTOR_ENABLED_KEY, false);
+    }
+
+    private static boolean isCollectorEnabled(BlockEntity be) {
+        if (!(be instanceof ShulkerBoxBlockEntity shulker)) return false;
+        NbtComponent customData = shulker.getComponents().get(DataComponentTypes.CUSTOM_DATA);
         return customData != null && customData.copyNbt().getBoolean(COLLECTOR_ENABLED_KEY, false);
     }
 
@@ -685,7 +914,7 @@ public class GatherNetworking {
     }
 
     private static boolean matchesTarget(ItemStack stack, Set<String> targets) {
-        String id = Registries.ITEM.getId(stack.getItem()).toString();
+        String id = ITEM_ID_STR_CACHE.computeIfAbsent(stack.getItem(), item -> Registries.ITEM.getId(item).toString());
         if (targets.contains(id)) return true;
         for (String target : targets) {
             if (isSameWoodFamily(target, id)) return true;

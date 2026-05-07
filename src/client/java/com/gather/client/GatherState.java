@@ -11,7 +11,9 @@ import net.minecraft.util.math.BlockPos;
 
 import java.io.*;
 import java.lang.reflect.Type;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -39,11 +41,29 @@ public class GatherState {
     }
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    // Global fallback file — used for migration and when no world is loaded
-    private static final Path LISTS_FILE  = FabricLoader.getInstance().getConfigDir().resolve("gather_lists.json");
-    // Legacy single-list paths — used only for migration
+    private static final Path GATHER_DIR = GatherSettings.GATHER_DIR;
+    // Global fallback file — used when no world is loaded
+    private static final Path LISTS_FILE        = GATHER_DIR.resolve("lists.json");
+    // Legacy single-list paths — used only for migration (old pre-multi-list format)
     private static final Path LEGACY_FILE       = FabricLoader.getInstance().getConfigDir().resolve("gather_list.json");
     private static final Path LEGACY_GOALS_FILE = FabricLoader.getInstance().getConfigDir().resolve("gather_goals.json");
+
+    // Bulk migrate all gather_*.json files from config root to gather/ subdir on first launch
+    public static void migrateAllToSubdir() {
+        Path configDir = FabricLoader.getInstance().getConfigDir();
+        File[] old = configDir.toFile().listFiles((d, n) -> n.startsWith("gather_") && n.endsWith(".json"));
+        if (old == null) return;
+        for (File f : old) {
+            String newName = f.getName().substring("gather_".length());
+            Path dest = GATHER_DIR.resolve(newName);
+            if (!Files.exists(dest)) {
+                try { Files.move(f.toPath(), dest, StandardCopyOption.REPLACE_EXISTING); }
+                catch (IOException ignored) {}
+            } else {
+                f.delete(); // already migrated, stale duplicate
+            }
+        }
+    }
 
     private static final Type LISTS_TYPE    = new TypeToken<ArrayList<GatherList>>(){}.getType();
     private static final Type LEGACY_TYPE   = new TypeToken<ArrayList<ListNode>>(){}.getType();
@@ -51,13 +71,20 @@ public class GatherState {
 
     private static GatherState instance;
     private static String currentWorldId = null;
+    private static boolean serverXrayAllowed = false;
+    private static final long SAVE_DEBOUNCE_MS = 500L;
+    private static boolean savePending = false;
+    private static long saveDueAtMs = 0L;
+
+    public static boolean isServerXrayAllowed() { return serverXrayAllowed; }
+    public static void setServerXrayAllowed(boolean v) { serverXrayAllowed = v; }
 
     private static final int MAX_LISTS = 10;
 
     // ─── WORLD MANAGEMENT ────────────────────────────────────────────────────
 
     public static void loadForWorld(net.minecraft.client.MinecraftClient client) {
-        if (instance != null) instance.save();
+        if (instance != null) instance.flushSaveNow();
         currentWorldId = deriveWorldId(client);
         instance = load();
         loadHiddenBaseMaterials(instance);
@@ -70,9 +97,16 @@ public class GatherState {
     }
 
     public static void unload() {
-        if (instance != null) instance.save();
+        if (instance != null) instance.flushSaveNow();
         instance = null;
+        savePending = false;
         currentWorldId = null;
+        serverXrayAllowed = false;
+    }
+
+    public static void flushPendingSaveIfDue() {
+        if (instance == null || !savePending) return;
+        if (System.currentTimeMillis() >= saveDueAtMs) instance.flushSaveNow();
     }
 
     public static String getCurrentWorldId() { return currentWorldId; }
@@ -98,7 +132,7 @@ public class GatherState {
     }
 
     private static Path listsFileForWorld(String worldId) {
-        return FabricLoader.getInstance().getConfigDir().resolve("gather_lists_" + worldId + ".json");
+        return GATHER_DIR.resolve("lists_" + worldId + ".json");
     }
 
     private static Path activeFile() {
@@ -107,17 +141,28 @@ public class GatherState {
 
     // Returns IDs of all worlds that have saved list files, excluding the current world.
     public static List<String> listOtherWorldIds() {
-        java.io.File dir = FabricLoader.getInstance().getConfigDir().toFile();
-        java.io.File[] files = dir.listFiles((d, n) ->
-            n.startsWith("gather_lists_") && n.endsWith(".json"));
+        File[] files = GATHER_DIR.toFile().listFiles((d, n) ->
+            n.startsWith("lists_") && n.endsWith(".json"));
         if (files == null) return new ArrayList<>();
         List<String> ids = new ArrayList<>();
-        for (java.io.File f : files) {
+        for (File f : files) {
             String fn = f.getName();
-            String id = fn.substring("gather_lists_".length(), fn.length() - ".json".length());
-            if (!id.equals(currentWorldId)) ids.add(id);
+            String id = fn.substring("lists_".length(), fn.length() - ".json".length());
+            if (!id.equals(currentWorldId) && worldIdStillExists(id)) ids.add(id);
         }
         return ids;
+    }
+
+    private static boolean worldIdStillExists(String worldId) {
+        if (!worldId.startsWith("sp_")) return true;
+        java.io.File savesDir = FabricLoader.getInstance().getGameDir().resolve("saves").toFile();
+        java.io.File[] worlds = savesDir.listFiles(java.io.File::isDirectory);
+        if (worlds == null) return false;
+        String target = worldId.substring(3);
+        for (java.io.File world : worlds) {
+            if (sanitizeId(world.getName()).equals(target)) return true;
+        }
+        return false;
     }
 
     // Load lists from an arbitrary world file (for transfer UI).
@@ -137,7 +182,11 @@ public class GatherState {
         List<GatherList> source = loadListsFromWorld(worldId);
         if (listIndex < 0 || listIndex >= source.size()) return null;
         if (lists.size() >= MAX_LISTS) return null;
-        GatherList src = source.get(listIndex);
+        return importList(source.get(listIndex));
+    }
+
+    public GatherList importList(GatherList src) {
+        if (src == null || lists.size() >= MAX_LISTS) return null;
         GatherList copy = new GatherList(src.name);
         copy.nodes = src.nodes.stream().map(ListNode::copy).collect(Collectors.toCollection(ArrayList::new));
         copy.savedGoals = src.savedGoals != null
@@ -165,8 +214,12 @@ public class GatherState {
     private transient Set<Long> manualChests = new LinkedHashSet<>();
     private transient Map<Long, Map<String, Integer>> manualChestContents = new HashMap<>();
     private transient Map<String, Integer> manualChestCounts = new HashMap<>();
+    private transient Map<Long, Map<String, Integer>> collectorChestContents = new HashMap<>();
+    private transient Map<String, Integer> collectorChestCounts = new HashMap<>();
     private transient Set<String> effectivelyNeededIds = new HashSet<>();
-    private transient Map<String, Boolean> neededItemCache = new HashMap<>();
+    private transient Map<Item, Boolean> neededItemCache = new HashMap<>();
+    // Placed collector shulker positions → item list (server-authoritative)
+    private transient java.util.concurrent.ConcurrentHashMap<Long, java.util.List<String>> collectorPositions = new java.util.concurrent.ConcurrentHashMap<>();
 
     // ─── SINGLETON ───────────────────────────────────────────────────────────
 
@@ -204,6 +257,13 @@ public class GatherState {
         return all;
     }
 
+    /** Total node count without allocating a list. Use instead of getNodes().size() in hot paths. */
+    public int getTotalNodeCount() {
+        int count = 0;
+        for (GatherList list : lists) count += list.nodes.size();
+        return count;
+    }
+
     public List<ListNode> getNodes(int listIndex) {
         if (listIndex < 0 || listIndex >= lists.size()) return List.of();
         return lists.get(listIndex).nodes;
@@ -239,6 +299,13 @@ public class GatherState {
         if (listIndex < 0 || listIndex >= lists.size()) return;
         lists.get(listIndex).name = name.isBlank() ? "List" : name;
         save();
+    }
+
+    public void toggleListHudHidden(int listIndex) {
+        if (listIndex < 0 || listIndex >= lists.size()) return;
+        lists.get(listIndex).hudHidden = !lists.get(listIndex).hudHidden;
+        save();
+        GatherHud.markDirty();
     }
 
     // ─── ITEM OPERATIONS ─────────────────────────────────────────────────────
@@ -358,6 +425,7 @@ public class GatherState {
     }
 
     private boolean autoSyncList(GatherList list, Function<String, Integer> countFn) {
+        if (!GatherSettings.get().autoRemoveCompleted) return false;
         boolean changed = false;
         List<ListNode> nodes      = list.nodes;
         List<ListNode> savedGoals = list.savedGoals;
@@ -404,21 +472,21 @@ public class GatherState {
     // ─── QUERIES ─────────────────────────────────────────────────────────────
 
     public boolean isNeeded(Item item) {
-        String id = Registries.ITEM.getId(item).toString();
-        Boolean cached = neededItemCache.get(id);
+        Boolean cached = neededItemCache.get(item);
         if (cached != null) return cached;
+        String id = Registries.ITEM.getId(item).toString();
         if (isBaseMaterialHidden(id)) return false;
         if (effectivelyNeededIds.contains(id)) {
-            neededItemCache.put(id, true);
+            neededItemCache.put(item, true);
             return true;
         }
         for (String needId : effectivelyNeededIds) {
             if (isSameWoodFamily(needId, id)) {
-                neededItemCache.put(id, true);
+                neededItemCache.put(item, true);
                 return true;
             }
         }
-        neededItemCache.put(id, false);
+        neededItemCache.put(item, false);
         return false;
     }
 
@@ -729,6 +797,16 @@ public class GatherState {
         return result;
     }
 
+    /** Whether any depth-0 non-hidden node exists. Zero-allocation alternative to !getNeeded().isEmpty(). */
+    public boolean hasNeeded() {
+        for (GatherList list : lists) {
+            for (ListNode n : list.nodes) {
+                if (n.depth == 0 && !isBaseMaterialHidden(n.itemId)) return true;
+            }
+        }
+        return false;
+    }
+
     public List<String> getChestScanTargets(java.util.function.Function<String, Integer> inventoryCounter) {
         Map<String, Integer> result = new LinkedHashMap<>();
         for (int li = 0; li < lists.size(); li++) {
@@ -759,7 +837,30 @@ public class GatherState {
         GatherHud.markDirty();
     }
 
+    public java.util.Map<Long, java.util.List<String>> getCollectorPositions() { return collectorPositions; }
+
+    public Map<String, Integer> getCollectorChestContents(long encoded) {
+        return collectorChestContents.getOrDefault(encoded, Map.of());
+    }
+
+    public boolean hasCollectorChestContents(long encoded) {
+        return collectorChestContents.containsKey(encoded);
+    }
+
+    public void setCollectorPositions(java.util.List<com.gather.network.PlacedCollectorPositionsPayload.Entry> entries) {
+        collectorPositions.clear();
+        for (var e : entries) collectorPositions.put(e.pos(), e.items());
+        collectorChestContents.keySet().retainAll(collectorPositions.keySet());
+        rebuildCollectorChestCounts();
+    }
+
     public Set<Long> getTrackedChests() { return trackedChests; }
+
+    public Set<Long> getTrackedChestsWithoutContents() {
+        Set<Long> result = new HashSet<>(trackedChests);
+        result.removeAll(trackedChestContents.keySet());
+        return result;
+    }
 
     public void toggleTrackedChest(BlockPos pos) {
         long key = pos.asLong();
@@ -779,6 +880,7 @@ public class GatherState {
         if (trackedChests.remove(encoded)) {
             trackedChestContents.remove(encoded);
             rebuildTrackedChestCounts();
+            cachedFinderChests = null;
         }
     }
 
@@ -833,6 +935,7 @@ public class GatherState {
         trackedChestContents.clear();
         trackedChestCounts.clear();
         chestScanMode = false;
+        cachedFinderChests = null;
         saveTrackedChests();
         saveTrackedChestContents();
     }
@@ -841,6 +944,10 @@ public class GatherState {
         boolean autoChanged = false, manualChanged = false;
         for (Map.Entry<Long, Map<String, Integer>> entry : updates.entrySet()) {
             long key = entry.getKey();
+            if (collectorPositions.containsKey(key)) {
+                collectorChestContents.put(key, new HashMap<>(entry.getValue()));
+                continue;
+            }
             if (manualChests.contains(key)) {
                 manualChestContents.put(key, new HashMap<>(entry.getValue()));
                 manualChanged = true;
@@ -852,10 +959,13 @@ public class GatherState {
         }
         if (autoChanged) { rebuildTrackedChestCounts(); saveTrackedChestContents(); }
         if (manualChanged) { rebuildManualChestCounts(); saveManualChestContents(); }
+        rebuildCollectorChestCounts();
+        if (autoChanged || manualChanged) cachedFinderChests = null;
     }
 
     public int getTrackedChestCount(String itemId) { return trackedChestCounts.getOrDefault(itemId, 0); }
     public int getManualChestCount(String itemId)  { return manualChestCounts.getOrDefault(itemId, 0); }
+    public int getCollectorChestCount(String itemId) { return collectorChestCounts.getOrDefault(itemId, 0); }
 
     public int getTrackedChestCountMatching(String itemId) {
         return countMatchingChestItems(trackedChestCounts, itemId);
@@ -863,6 +973,29 @@ public class GatherState {
 
     public int getManualChestCountMatching(String itemId) {
         return countMatchingChestItems(manualChestCounts, itemId);
+    }
+
+    public int getCollectorChestCountMatching(String itemId) {
+        return countMatchingChestItems(collectorChestCounts, itemId);
+    }
+
+    // Registry lookups are stable — never need invalidation.
+    private static final Map<String, Item> ITEM_LOOKUP_CACHE = new HashMap<>();
+    private static final Map<String, Set<String>> ITEM_TAG_PATH_CACHE = new HashMap<>();
+    private static final Map<String, Set<String>> EXPECTED_TAG_PATHS_CACHE = new HashMap<>();
+
+    private static Item cachedItem(String itemId) {
+        return ITEM_LOOKUP_CACHE.computeIfAbsent(itemId, id -> Registries.ITEM.get(Identifier.of(id)));
+    }
+
+    private static Set<String> cachedTagPaths(String itemId) {
+        return ITEM_TAG_PATH_CACHE.computeIfAbsent(itemId, id -> {
+            Item item = cachedItem(id);
+            if (item == null) return Set.of();
+            return item.getRegistryEntry().streamTags()
+                    .map(tag -> tag.id().getPath())
+                    .collect(Collectors.toSet());
+        });
     }
 
     private static int countMatchingChestItems(Map<String, Integer> counts, String itemId) {
@@ -875,20 +1008,29 @@ public class GatherState {
                 total += entry.getValue();
                 continue;
             }
-            Item foundItem = Registries.ITEM.get(Identifier.of(foundId));
-            if (foundItem != null && foundItem.getRegistryEntry().streamTags()
-                    .anyMatch(tag -> expectedTagPaths.contains(tag.id().getPath()))) {
+            Set<String> foundTags = cachedTagPaths(foundId);
+            if (!foundTags.isEmpty() && !Collections.disjoint(foundTags, expectedTagPaths)) {
                 total += entry.getValue();
             }
         }
         return total;
     }
 
+    private void rebuildCollectorChestCounts() {
+        Map<String, Integer> totals = new HashMap<>();
+        for (Map<String, Integer> contents : collectorChestContents.values()) {
+            contents.forEach((id, count) -> totals.merge(id, count, Integer::sum));
+        }
+        collectorChestCounts = totals;
+    }
+
     private static Set<String> expectedTagPaths(String itemPath) {
-        Set<String> paths = new HashSet<>();
-        paths.add(itemPath);
-        paths.add(pluralizeTagPath(itemPath));
-        return paths;
+        return EXPECTED_TAG_PATHS_CACHE.computeIfAbsent(itemPath, path -> {
+            Set<String> paths = new HashSet<>(2);
+            paths.add(path);
+            paths.add(pluralizeTagPath(path));
+            return paths;
+        });
     }
 
     private static String pluralizeTagPath(String itemPath) {
@@ -909,10 +1051,13 @@ public class GatherState {
     // ─── CHEST FINDER ────────────────────────────────────────────────────────
 
     private transient String chestFinderItemId = null;
+    private transient String cachedFinderItemId = null;
+    private transient Set<Long> cachedFinderChests = null;
 
     public String getChestFinderItemId() { return chestFinderItemId; }
     public void   setChestFinderItemId(String id) {
         chestFinderItemId = id;
+        cachedFinderChests = null; // finder query changed
         GatherHud.markDirty();
     }
 
@@ -926,13 +1071,16 @@ public class GatherState {
         return result;
     }
 
-    /** Positions (encoded longs) of every chest whose contents match the given item. */
+    /** Positions (encoded longs) of every chest whose contents match the given item. Cached per itemId. */
     public Set<Long> getChestsContaining(String itemId) {
+        if (itemId.equals(cachedFinderItemId) && cachedFinderChests != null) return cachedFinderChests;
         Set<Long> result = new HashSet<>();
         for (Map.Entry<Long, Map<String, Integer>> e : trackedChestContents.entrySet())
             if (countMatchingChestItems(e.getValue(), itemId) > 0) result.add(e.getKey());
         for (Map.Entry<Long, Map<String, Integer>> e : manualChestContents.entrySet())
             if (countMatchingChestItems(e.getValue(), itemId) > 0) result.add(e.getKey());
+        cachedFinderItemId = itemId;
+        cachedFinderChests = result;
         return result;
     }
 
@@ -946,6 +1094,7 @@ public class GatherState {
         if (manualChests.remove(encoded)) {
             manualChestContents.remove(encoded);
             rebuildManualChestCounts();
+            cachedFinderChests = null;
             saveManualChests();
             saveManualChestContents();
         }
@@ -955,6 +1104,7 @@ public class GatherState {
         long key = pos.asLong();
         if (manualChests.remove(key)) {
             manualChestContents.remove(key);
+            cachedFinderChests = null;
         } else {
             manualChests.add(key);
         }
@@ -967,6 +1117,7 @@ public class GatherState {
         manualChests.clear();
         manualChestContents.clear();
         manualChestCounts.clear();
+        cachedFinderChests = null;
         saveManualChests();
         saveManualChestContents();
     }
@@ -985,12 +1136,12 @@ public class GatherState {
 
     private static Path manualChestsFile() {
         String worldId = currentWorldId != null ? currentWorldId : "default";
-        return FabricLoader.getInstance().getConfigDir().resolve("gather_manual_chests_" + worldId + ".json");
+        return GATHER_DIR.resolve("manual_chests_" + worldId + ".json");
     }
 
     private static Path manualChestContentsFile() {
         String worldId = currentWorldId != null ? currentWorldId : "default";
-        return FabricLoader.getInstance().getConfigDir().resolve("gather_manual_chest_contents_" + worldId + ".json");
+        return GATHER_DIR.resolve("manual_chest_contents_" + worldId + ".json");
     }
 
     private void saveManualChests() {
@@ -1063,12 +1214,12 @@ public class GatherState {
 
     private static Path trackedChestsFile() {
         String worldId = currentWorldId != null ? currentWorldId : "default";
-        return FabricLoader.getInstance().getConfigDir().resolve("gather_tracked_chests_" + worldId + ".json");
+        return GATHER_DIR.resolve("tracked_chests_" + worldId + ".json");
     }
 
     private static Path trackedChestContentsFile() {
         String worldId = currentWorldId != null ? currentWorldId : "default";
-        return FabricLoader.getInstance().getConfigDir().resolve("gather_tracked_chest_contents_" + worldId + ".json");
+        return GATHER_DIR.resolve("tracked_chest_contents_" + worldId + ".json");
     }
 
     private void saveTrackedChests() {
@@ -1130,14 +1281,21 @@ public class GatherState {
 
     public void save() {
         GatherHud.markDirty();
+        savePending = true;
+        saveDueAtMs = System.currentTimeMillis() + SAVE_DEBOUNCE_MS;
+    }
+
+    private void flushSaveNow() {
+        GatherHud.markDirty();
         try (Writer w = new FileWriter(activeFile().toFile())) {
             GSON.toJson(lists, w);
+            savePending = false;
         } catch (IOException ignored) {}
     }
 
     private static Path hiddenBaseMaterialsFile() {
         String worldId = currentWorldId != null ? currentWorldId : "default";
-        return FabricLoader.getInstance().getConfigDir().resolve("gather_hidden_base_materials_" + worldId + ".json");
+        return GATHER_DIR.resolve("hidden_base_materials_" + worldId + ".json");
     }
 
     private void saveHiddenBaseMaterials() {

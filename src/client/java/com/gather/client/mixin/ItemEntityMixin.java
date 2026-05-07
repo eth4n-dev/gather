@@ -17,6 +17,7 @@ public class ItemEntityMixin {
 
     @Inject(method = "isGlowing", at = @At("HEAD"), cancellable = true)
     private void gather_isGlowing(CallbackInfoReturnable<Boolean> cir) {
+        if (!GatherState.isServerXrayAllowed()) return;
         if (!GatherSettings.get().enabled || !GatherSettings.get().highlightEnabled || !GatherSettings.get().droppedItemXray) return;
         if ((Object)this instanceof ItemEntity ie
                 && !ie.getStack().isEmpty()
@@ -27,6 +28,7 @@ public class ItemEntityMixin {
 
     @Inject(method = "getTeamColorValue", at = @At("HEAD"), cancellable = true)
     private void gather_glowColor(CallbackInfoReturnable<Integer> cir) {
+        if (!GatherState.isServerXrayAllowed()) return;
         if (!GatherSettings.get().enabled || !GatherSettings.get().highlightEnabled || !GatherSettings.get().droppedItemXray) return;
         if ((Object)this instanceof ItemEntity ie
                 && !ie.getStack().isEmpty()

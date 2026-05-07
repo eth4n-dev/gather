@@ -4,6 +4,8 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "HandledScreenAccessor",
+    "HandledScreenMixin",
+    "InGameHudMixin",
     "ItemEntityMixin",
     "UseBlockMixin",
     "WorldRendererMixin"

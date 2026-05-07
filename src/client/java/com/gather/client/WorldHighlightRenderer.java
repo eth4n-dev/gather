@@ -5,8 +5,12 @@ import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ChestBlock;
+import net.minecraft.block.ShulkerBoxBlock;
+import net.minecraft.block.entity.ShulkerBoxBlockEntity;
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.RenderLayers;
@@ -18,8 +22,10 @@ import net.minecraft.client.world.ClientWorld;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.BlockPos;
@@ -46,13 +52,15 @@ public class WorldHighlightRenderer {
     private static final long SCAN_INTERVAL_MS = 1500;
     private static final long VERTICAL_EXPAND_STABLE_MS = 3500;
     private static final long SECTION_CACHE_TTL_MS = 30_000;
-    private static final int INITIAL_VERTICAL_SCAN_RADIUS = 6;
-    private static final int VERTICAL_PRIORITY_WEIGHT = 6;
+    private static final long SECTION_CACHE_PRUNE_INTERVAL_MS = 5_000;
+    private static final int INITIAL_VERTICAL_SCAN_RADIUS = 10;
+    private static final int VERTICAL_PRIORITY_WEIGHT = 3;
     private static final int INITIAL_VISIBLE_OUTLINES = 24;
     private static final int CHEST_XRAY_MAX_DISTANCE = 100;
     private static final double CHEST_XRAY_MAX_DISTANCE_SQ = CHEST_XRAY_MAX_DISTANCE * CHEST_XRAY_MAX_DISTANCE;
     private static final long FAR_CHEST_NOTICE_MS = 3000;
-    private static final long CHEST_XRAY_VALIDATE_MS = 250;
+    private static final long CHEST_XRAY_VALIDATE_MS = 2000;
+    private static final long SHULKER_ANIMATION_VALIDATE_MS = 25L;
     private static final float OUTLINE_EPSILON = 0.0025f;
     private static final double CONTAINER_OUTLINE_INFLATE = 0.012;
     private static final double CONTAINER_EDGE = 0.018;
@@ -62,13 +70,18 @@ public class WorldHighlightRenderer {
     private static final int MANUAL_XRAY_EDGE = 0xB0FF9600;
     private static final int MANUAL_SCAN_XRAY_FILL = 0x28FFC800;
     private static final int MANUAL_SCAN_XRAY_EDGE = 0xB0FFC800;
-    private static final int FINDER_XRAY_FILL = 0x50FF2020;
-    private static final int FINDER_XRAY_EDGE = 0xD0FF2020;
+    private static final int FINDER_XRAY_FILL    = 0x50FF2020;
+    private static final int FINDER_XRAY_EDGE    = 0xD0FF2020;
+    private static final int COLLECTOR_XRAY_FILL = 0x28CC44FF;
+    private static final int COLLECTOR_XRAY_EDGE = 0xB0CC44FF;
+    private static final double COLLECTOR_LABEL_MAX_DISTANCE = 22.0;
+    private static final double COLLECTOR_LABEL_MAX_DISTANCE_SQ = COLLECTOR_LABEL_MAX_DISTANCE * COLLECTOR_LABEL_MAX_DISTANCE;
 
     private static Set<Block> cachedNeededBlocks = new HashSet<>();
     private static int cachedNodeCount = -1;
     private static List<BlockPos> cachedHighlights = null;
     private static long lastScanTime = 0;
+    private static long lastSectionCachePruneMs = 0L;
     private static BlockPos lastPlayerPos = null;
     private static ChunkKey currentPlayerChunk = null;
     private static ChunkKey lastVerticalExpandChunk = null;
@@ -77,14 +90,41 @@ public class WorldHighlightRenderer {
     private static ScanJob scanJob = null;
     private static final Map<SectionKey, SectionScanCache> sectionScanCache = new HashMap<>();
     private static final Map<Long, ChestXrayCache> chestXrayCache = new HashMap<>();
+    private static final Map<Long, VoxelShape> highlightShapeCache = new HashMap<>();
+    private static final Map<Long, Long> shulkerAnimationWatchUntil = new HashMap<>();
+    private static final Map<Long, Long> pendingPlacedContainerUntil = new HashMap<>();
     private static long lastFarChestNoticeMs = 0L;
+    private static Set<Long> collectorShulkerPositions = new HashSet<>();
+    private static Matrix4f lastWorldPositionMatrix = null;
+    private static Matrix4f lastWorldProjectionMatrix = null;
+
+    private static final Map<Long, Boolean> collectorShulkerValid = new HashMap<>();
+    private static long lastCollectorShulkerLabelValidateMs = 0L;
+    private static final long COLLECTOR_LABEL_VALIDATE_MS = 1000L;
+    // Sorted top-3 contents per collector, rebuilt in the 1s validation batch (not per frame)
+    private static final Map<Long, List<CollectorLabelRow>> collectorSortedContents = new HashMap<>();
+    // Reused Vector4f for screen projection — render thread only
+    private static final org.joml.Vector4f projectVec = new org.joml.Vector4f();
+    // Reused set for highlightShapeCache.retainAll — avoids stream+collect allocation every second
+    private static final Set<Long> retainSetBuf = new HashSet<>();
+    // Reused set for finder xray pass — avoids new HashSet<>() allocation every frame
+    private static final Set<Long> finderDrawn = new HashSet<>();
 
     private record SectionKey(int x, int y, int z) {}
     private record ChunkKey(int x, int z) {}
     private record SectionScanCache(int neededHash, long scannedAtMs, List<BlockPos> positions) {}
     private record ScanJob(BlockPos origin, int radius, int verticalRadius, int neededHash,
-                           Deque<SectionKey> pending, List<BlockPos> highlights) {}
-    private record ChestXrayCache(BlockPos pos, Box bounds, long validatedAtMs, boolean valid) {}
+                           Deque<SectionKey> pending, List<BlockPos> highlights, Set<Long> highlightSet) {}
+    private record ChestXrayCache(BlockPos pos, Box bounds, long validatedAtMs, boolean valid, boolean isCollector, boolean animating) {}
+    private record DrawSpec(BlockPos pos, Box bounds, VoxelShape shape, int fillArgb, int edgeArgb, boolean isCollector) {}
+    private record CollectorLabelRow(String label, ItemStack stack) {}
+
+    private static List<DrawSpec> chestDrawList = null;
+    private static boolean chestDrawDirty = true;
+    private static long chestDrawListBuiltAt = 0L;
+    private static final long CHEST_DRAW_LIST_TTL_MS = 2000L;
+    private static final long HIGHLIGHT_VALIDATE_INTERVAL_MS = 1000L;
+    private static long lastHighlightValidatedMs = 0L;
 
     public static void invalidateCache() {
         cachedNeededBlocks = new HashSet<>();
@@ -96,9 +136,71 @@ public class WorldHighlightRenderer {
         lastVerticalExpandChunk = null;
         currentChunkEnteredAtMs = 0L;
         highlightRampStartedAtMs = 0L;
+        lastHighlightValidatedMs = 0L;
+        lastSectionCachePruneMs = 0L;
         scanJob = null;
         sectionScanCache.clear();
         chestXrayCache.clear();
+        highlightShapeCache.clear();
+        shulkerAnimationWatchUntil.clear();
+        pendingPlacedContainerUntil.clear();
+        chestDrawList = null;
+        chestDrawDirty = true;
+        collectorShulkerPositions = new HashSet<>();
+        lastWorldPositionMatrix = null;
+        lastWorldProjectionMatrix = null;
+        collectorShulkerValid.clear();
+        lastCollectorShulkerLabelValidateMs = 0L;
+        collectorSortedContents.clear();
+        finderDrawn.clear();
+        retainSetBuf.clear();
+    }
+
+    public static void invalidateCollectorCache() {
+        collectorShulkerPositions = new HashSet<>();
+        chestDrawDirty = true;
+        collectorShulkerValid.clear();
+        lastCollectorShulkerLabelValidateMs = 0L;
+        collectorSortedContents.clear();
+        chestXrayCache.clear();
+        shulkerAnimationWatchUntil.clear();
+        pendingPlacedContainerUntil.clear();
+    }
+
+    public static void markChestSetDirty() { chestDrawDirty = true; }
+
+    public static void evictChestXrayCache(long posLong) {
+        chestXrayCache.remove(posLong);
+        // Evict cardinal neighbors so double-chest partner bounds are recomputed immediately
+        BlockPos p = BlockPos.fromLong(posLong);
+        chestXrayCache.remove(p.north().asLong());
+        chestXrayCache.remove(p.south().asLong());
+        chestXrayCache.remove(p.east().asLong());
+        chestXrayCache.remove(p.west().asLong());
+        chestDrawDirty = true;
+    }
+
+    public static void watchShulkerAnimation(long posLong) {
+        shulkerAnimationWatchUntil.put(posLong, System.currentTimeMillis() + 1200L);
+        evictChestXrayCache(posLong);
+    }
+
+    public static void watchNewContainerPlacement(long posLong) {
+        long until = System.currentTimeMillis() + 1500L;
+        pendingPlacedContainerUntil.put(posLong, until);
+        chestXrayCache.remove(posLong);
+        chestDrawDirty = true;
+        chestDrawListBuiltAt = 0L;
+    }
+
+    public static void resetCollectorLabelCache() {
+        lastCollectorShulkerLabelValidateMs = 0L;
+        collectorSortedContents.clear();
+    }
+
+    public static void captureWorldMatrices(Matrix4f positionMatrix, Matrix4f projectionMatrix) {
+        lastWorldPositionMatrix = new Matrix4f(positionMatrix);
+        lastWorldProjectionMatrix = new Matrix4f(projectionMatrix);
     }
 
     public static void register() {
@@ -109,11 +211,13 @@ public class WorldHighlightRenderer {
         GatherSettings settings = GatherSettings.get();
         if (!settings.enabled) return false;
         GatherState state = GatherState.get();
-        boolean hasContainerXray = settings.chestOutlinesEnabled
+        boolean xrayAllowed = GatherState.isServerXrayAllowed();
+        boolean hasContainerXray = xrayAllowed && settings.chestOutlinesEnabled && settings.chestXray
                 && (settings.countChests ? !state.getTrackedChests().isEmpty() : !state.getManualChests().isEmpty());
-        boolean hasFinderXray = state.getChestFinderItemId() != null;
-        boolean hasBlockXray = settings.highlightEnabled && settings.blockXray && !state.getNeeded().isEmpty();
-        return hasContainerXray || hasFinderXray || hasBlockXray;
+        boolean hasCollectorXray = xrayAllowed && settings.collectorOutlinesEnabled && settings.chestXray;
+        boolean hasFinderXray = xrayAllowed && state.getChestFinderItemId() != null;
+        boolean hasBlockXray = xrayAllowed && settings.highlightEnabled && settings.blockXray && state.hasNeeded();
+        return hasContainerXray || hasCollectorXray || hasFinderXray || hasBlockXray;
     }
 
     private static void onAfterEntities(WorldRenderContext ctx) {
@@ -130,12 +234,20 @@ public class WorldHighlightRenderer {
         MatrixStack matrices = ctx.matrices();
 
         // Needed block outlines (depth-tested LINES — skipped when blockXray is on, which uses no-depth quads)
-        if (GatherSettings.get().highlightEnabled && !GatherSettings.get().blockXray && !state.getNeeded().isEmpty()) {
+        if (GatherSettings.get().highlightEnabled && !GatherSettings.get().blockXray && state.hasNeeded()) {
             renderNeededBlockHighlights(state, world, client, camPos, consumers, matrices);
         }
+
+        // Chest/collector depth-tested LINES outlines — always drawn; xray fill is separate via WorldRenderer TAIL
+        GatherSettings settings = GatherSettings.get();
+        if (settings.chestOutlinesEnabled || settings.collectorOutlinesEnabled) {
+            renderScannedContainerNormal(state, world, client, camPos, consumers, matrices);
+        }
+
     }
 
     public static void renderScannedContainerXray(Camera camera) {
+        if (!GatherState.isServerXrayAllowed()) return;
         MinecraftClient client = MinecraftClient.getInstance();
         ClientWorld world = client.world;
         if (world == null || client.player == null) return;
@@ -146,16 +258,7 @@ public class WorldHighlightRenderer {
 
         GatherState state = GatherState.get();
         GatherSettings settings = GatherSettings.get();
-        boolean scanAllOn = settings.countChests;
         String finderItemId = state.getChestFinderItemId();
-        Set<Long> autoChests = settings.chestOutlinesEnabled && scanAllOn
-                ? state.getTrackedChests() : Collections.emptySet();
-        Set<Long> manualChests = settings.chestOutlinesEnabled && !scanAllOn
-                ? state.getManualChests() : Collections.emptySet();
-        Set<Long> finderChests = finderItemId != null
-                ? state.getChestsContaining(finderItemId) : Collections.emptySet();
-
-        if (autoChests.isEmpty() && manualChests.isEmpty() && finderChests.isEmpty()) return;
 
         VertexConsumerProvider.Immediate consumers = client.getBufferBuilders().getEntityVertexConsumers();
         VertexConsumer quads = consumers.getBuffer(xrayLayer);
@@ -165,47 +268,31 @@ public class WorldHighlightRenderer {
 
         Vec3d camPos = camera.getCameraPos();
         BlockPos playerPos = client.player.getBlockPos();
-        boolean scanMode = state.isChestScanMode();
-        boolean drew = false;
-        int hiddenFar = 0;
-        Set<Long> drawn = new HashSet<>();
+        long now = System.currentTimeMillis();
 
-        if (settings.chestOutlinesEnabled) {
-            List<Long> deadAuto = new ArrayList<>(), deadManual = new ArrayList<>();
-
-            for (long encoded : autoChests) {
-                if (drawn.contains(encoded)) continue;
-                BlockPos pos = BlockPos.fromLong(encoded);
-                ChestXrayCache cache = getChestXrayCache(world, pos);
-                if (cache == null) continue;
-                if (!cache.valid()) { deadAuto.add(encoded); continue; }
-                if (isFarChestOutline(playerPos, pos)) { hiddenFar++; continue; }
-                markDoubleChestPartner(world, pos, drawn);
-                drawXrayContainerBox(quads, matrices, camPos, cache, AUTO_XRAY_FILL, AUTO_XRAY_EDGE);
-                drew = true;
-            }
-
-            for (long encoded : manualChests) {
-                if (drawn.contains(encoded)) continue;
-                BlockPos pos = BlockPos.fromLong(encoded);
-                ChestXrayCache cache = getChestXrayCache(world, pos);
-                if (cache == null) continue;
-                if (!cache.valid()) { deadManual.add(encoded); continue; }
-                if (isFarChestOutline(playerPos, pos)) { hiddenFar++; continue; }
-                markDoubleChestPartner(world, pos, drawn);
-                drawXrayContainerBox(quads, matrices, camPos, cache,
-                        scanMode ? MANUAL_SCAN_XRAY_FILL : MANUAL_XRAY_FILL,
-                        scanMode ? MANUAL_SCAN_XRAY_EDGE : MANUAL_XRAY_EDGE);
-                drew = true;
-            }
-
-            deadAuto.forEach(state::removeTrackedChest);
-            deadManual.forEach(state::removeManualChest);
+        // Rebuild cached draw list when dirty or TTL expired (every 2s)
+        if (chestDrawDirty || chestDrawList == null || now - chestDrawListBuiltAt > CHEST_DRAW_LIST_TTL_MS) {
+            rebuildChestDrawList(world, state, settings, now);
         }
 
-        // Finder pass — always render regardless of chestOutlinesEnabled
+        boolean drew = false;
+        int hiddenFar = 0;
+
+        // Render pre-built draw list (auto/manual/collector — cache rebuilt every 2s)
+        // Regular chests: xray fill only (no edges — LINES outline drawn in AFTER_ENTITIES, 6.5x cheaper)
+        // Collector specs: fill + thick edges when chest xray is enabled (count small, worth keeping for visibility)
+        boolean chestXrayOn = settings.chestXray;
+        for (DrawSpec spec : chestDrawList) {
+            if (!chestXrayOn) continue; // non-xray containers are rendered in AFTER_ENTITIES
+            if (isFarChestOutline(playerPos, spec.pos())) { hiddenFar++; continue; }
+            drawXrayContainerBox(quads, matrices, camPos, spec.pos(), spec.bounds(), spec.fillArgb(), spec.edgeArgb(), spec.isCollector());
+            drew = true;
+        }
+
+        // Finder pass — always dynamic, different color per query
         if (finderItemId != null) {
-            Set<Long> finderDrawn = new HashSet<>();
+            Set<Long> finderChests = state.getChestsContaining(finderItemId);
+            finderDrawn.clear();
             for (long encoded : finderChests) {
                 if (finderDrawn.contains(encoded)) continue;
                 BlockPos pos = BlockPos.fromLong(encoded);
@@ -213,13 +300,250 @@ public class WorldHighlightRenderer {
                 if (cache == null || !cache.valid()) continue;
                 if (isFarChestOutline(playerPos, pos)) { hiddenFar++; continue; }
                 markDoubleChestPartner(world, pos, finderDrawn);
-                drawXrayContainerBox(quads, matrices, camPos, cache, FINDER_XRAY_FILL, FINDER_XRAY_EDGE);
+                drawXrayContainerBox(quads, matrices, camPos, pos, cache.bounds(), FINDER_XRAY_FILL, FINDER_XRAY_EDGE, false);
                 drew = true;
             }
         }
 
-        if (hiddenFar > 0) showFarChestNotice(client, hiddenFar);
         if (drew) consumers.draw(xrayLayer);
+    }
+
+    private static void renderScannedContainerNormal(GatherState state, ClientWorld world,
+                                                      MinecraftClient client, Vec3d camPos,
+                                                      VertexConsumerProvider consumers, MatrixStack matrices) {
+        long now = System.currentTimeMillis();
+        GatherSettings settings = GatherSettings.get();
+        if (chestDrawDirty || chestDrawList == null || now - chestDrawListBuiltAt > CHEST_DRAW_LIST_TTL_MS) {
+            rebuildChestDrawList(world, state, settings, now);
+        }
+        if (chestDrawList == null || chestDrawList.isEmpty()) return;
+
+        BlockPos playerPos = client.player.getBlockPos();
+        VertexConsumer lines = consumers.getBuffer(RenderLayers.LINES);
+        boolean collectorEnabled = settings.collectorOutlinesEnabled;
+        boolean drew = false;
+        for (DrawSpec spec : chestDrawList) {
+            if (spec.isCollector() && !collectorEnabled) continue;
+            if (isFarChestOutline(playerPos, spec.pos())) continue;
+            drawFallbackContainerBox(lines, matrices, camPos, spec.pos(), spec.shape(), spec.edgeArgb());
+            drew = true;
+        }
+        if (drew && consumers instanceof VertexConsumerProvider.Immediate immediate) {
+            immediate.draw(RenderLayers.LINES);
+        }
+    }
+
+    private static void rebuildChestDrawList(ClientWorld world, GatherState state, GatherSettings settings, long now) {
+        List<DrawSpec> newList = new ArrayList<>();
+        boolean scanAllOn = settings.countChests;
+        boolean showChests = settings.chestOutlinesEnabled;
+        boolean showCollector = settings.collectorOutlinesEnabled;
+        boolean scanMode = state.isChestScanMode();
+
+        Set<Long> collectorPositions = showCollector
+                ? new HashSet<>(state.getCollectorPositions().keySet()) : Collections.emptySet();
+        collectorShulkerPositions = new HashSet<>(collectorPositions);
+
+        Set<Long> autoChests = (showChests || showCollector) && scanAllOn
+                ? state.getTrackedChests() : Collections.emptySet();
+        Set<Long> manualChests = (showChests || showCollector) && !scanAllOn
+                ? state.getManualChests() : Collections.emptySet();
+
+        Set<Long> drawn = new HashSet<>();
+        List<Long> deadAuto = new ArrayList<>(), deadManual = new ArrayList<>();
+        boolean hasAnimatingShulker = false;
+        boolean hasPendingPlacedContainer = false;
+        boolean hasUnresolvedCollectors = false;
+
+        for (long encoded : autoChests) {
+            if (drawn.contains(encoded)) continue;
+            BlockPos pos = BlockPos.fromLong(encoded);
+            ChestXrayCache cache = getChestXrayCache(world, pos);
+            if (cache == null) continue;
+            if (!cache.valid()) {
+                if (isPendingPlacedContainer(encoded, now)) hasPendingPlacedContainer = true;
+                else deadAuto.add(encoded);
+                continue;
+            }
+            if (cache.animating()) hasAnimatingShulker = true;
+            boolean collectorOutline = collectorPositions.contains(encoded);
+            if (!showChests && !(collectorOutline && showCollector)) continue;
+            markDoubleChestPartner(world, pos, drawn);
+            drawn.add(encoded);
+            int fill = collectorOutline ? COLLECTOR_XRAY_FILL : AUTO_XRAY_FILL;
+            int edge = collectorOutline ? COLLECTOR_XRAY_EDGE : AUTO_XRAY_EDGE;
+            newList.add(new DrawSpec(pos, cache.bounds(), shapeFromBounds(cache.bounds()), fill, edge, collectorOutline));
+        }
+
+        for (long encoded : manualChests) {
+            if (drawn.contains(encoded)) continue;
+            BlockPos pos = BlockPos.fromLong(encoded);
+            ChestXrayCache cache = getChestXrayCache(world, pos);
+            if (cache == null) continue;
+            if (!cache.valid()) {
+                if (isPendingPlacedContainer(encoded, now)) hasPendingPlacedContainer = true;
+                else deadManual.add(encoded);
+                continue;
+            }
+            if (cache.animating()) hasAnimatingShulker = true;
+            boolean collectorOutline = collectorPositions.contains(encoded);
+            if (!showChests && !(collectorOutline && showCollector)) continue;
+            markDoubleChestPartner(world, pos, drawn);
+            drawn.add(encoded);
+            int fill = collectorOutline ? COLLECTOR_XRAY_FILL : (scanMode ? MANUAL_SCAN_XRAY_FILL : MANUAL_XRAY_FILL);
+            int edge = collectorOutline ? COLLECTOR_XRAY_EDGE : (scanMode ? MANUAL_SCAN_XRAY_EDGE : MANUAL_XRAY_EDGE);
+            newList.add(new DrawSpec(pos, cache.bounds(), shapeFromBounds(cache.bounds()), fill, edge, collectorOutline));
+        }
+
+        // Standalone collector shulkers not in tracked/manual sets
+        if (showCollector) {
+            for (long encoded : collectorPositions) {
+                if (drawn.contains(encoded)) continue;
+                BlockPos pos = BlockPos.fromLong(encoded);
+                ChestXrayCache cache = getChestXrayCache(world, pos);
+                if (cache == null || !cache.valid()) {
+                    if (world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) hasUnresolvedCollectors = true;
+                    continue;
+                }
+                drawn.add(encoded);
+                if (cache.animating()) hasAnimatingShulker = true;
+                newList.add(new DrawSpec(pos, cache.bounds(), shapeFromBounds(cache.bounds()), COLLECTOR_XRAY_FILL, COLLECTOR_XRAY_EDGE, true));
+            }
+        }
+
+        deadAuto.forEach(state::removeTrackedChest);
+        deadManual.forEach(state::removeManualChest);
+
+        chestDrawList = newList;
+        // If collector positions are loaded but block entity not yet synced, retry in 250ms instead of 2s
+        chestDrawListBuiltAt = hasAnimatingShulker || hasPendingPlacedContainer
+                ? now - CHEST_DRAW_LIST_TTL_MS + SHULKER_ANIMATION_VALIDATE_MS
+                : hasUnresolvedCollectors ? now - CHEST_DRAW_LIST_TTL_MS + 250L : now;
+        chestDrawDirty = false;
+    }
+
+    public static void renderCollectorLabels(DrawContext ctx) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        ClientWorld world = client.world;
+        if (world == null || client.player == null) return;
+        if (!GatherSettings.get().collectorOutlinesEnabled) return;
+        if (lastWorldPositionMatrix == null || lastWorldProjectionMatrix == null) return;
+
+        Map<Long, List<String>> collectorPositions = GatherState.get().getCollectorPositions();
+        if (collectorPositions.isEmpty()) return;
+
+        int sw = client.getWindow().getScaledWidth();
+        int sh = client.getWindow().getScaledHeight();
+        Vec3d playerPos = client.player.getEyePos();
+
+        // Validate shulker block presence at most once per second instead of every frame
+        long nowLabel = System.currentTimeMillis();
+        if (nowLabel - lastCollectorShulkerLabelValidateMs > COLLECTOR_LABEL_VALIDATE_MS) {
+            lastCollectorShulkerLabelValidateMs = nowLabel;
+            collectorShulkerValid.keySet().retainAll(collectorPositions.keySet());
+            collectorSortedContents.keySet().retainAll(collectorPositions.keySet());
+            for (long enc : collectorPositions.keySet()) {
+                BlockPos p = BlockPos.fromLong(enc);
+                boolean valid = world.getBlockState(p).getBlock() instanceof ShulkerBoxBlock
+                        && world.getBlockEntity(p) instanceof ShulkerBoxBlockEntity;
+                collectorShulkerValid.put(enc, valid);
+                if (valid) {
+                    Map<String, Integer> contents = GatherState.get().getCollectorChestContents(enc);
+                    List<Map.Entry<String, Integer>> sorted = new ArrayList<>(contents.entrySet());
+                    sorted.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+                    int topN = Math.min(3, sorted.size());
+                    List<CollectorLabelRow> rows = new ArrayList<>(topN);
+                    for (int r = 0; r < topN; r++) {
+                        Map.Entry<String, Integer> re = sorted.get(r);
+                        rows.add(new CollectorLabelRow(itemLabel(re.getKey()) + " x" + re.getValue(), stackForItemId(re.getKey())));
+                    }
+                    collectorSortedContents.put(enc, rows);
+                } else {
+                    collectorSortedContents.remove(enc);
+                }
+            }
+        }
+
+        for (var entry : collectorPositions.entrySet()) {
+            long encoded = entry.getKey();
+            if (!collectorShulkerValid.getOrDefault(encoded, false)) continue;
+            BlockPos pos = BlockPos.fromLong(encoded);
+            Vec3d labelPos = new Vec3d(pos.getX() + 0.5, pos.getY() + 1.35, pos.getZ() + 0.5);
+            if (playerPos.squaredDistanceTo(labelPos) > COLLECTOR_LABEL_MAX_DISTANCE_SQ) continue;
+            List<CollectorLabelRow> lines = collectorSortedContents.getOrDefault(encoded, List.of());
+            if (lines.isEmpty()) continue;
+
+            Vec3d screen = projectToScreen(labelPos, sw, sh);
+            if (screen == null) continue;
+
+            double dist = playerPos.distanceTo(labelPos);
+            float scale = (float) Math.max(0.65f, Math.min(0.85f, 7.0 / dist));
+
+            int maxWidth = 0;
+            for (CollectorLabelRow row : lines) {
+                maxWidth = Math.max(maxWidth, client.textRenderer.getWidth(row.label()));
+            }
+
+            int lineH = 18;
+            int boxW = 22 + maxWidth + 8;
+            int boxH = 4 + lines.size() * lineH;
+            int left = (int) Math.round(screen.x - boxW / 2.0);
+            int top = (int) Math.round(screen.y - boxH - 6);
+
+            var matrices = ctx.getMatrices();
+            matrices.pushMatrix();
+            matrices.translate((float) screen.x, (float) screen.y);
+            matrices.scale(scale, scale);
+            matrices.translate((float) -screen.x, (float) -screen.y);
+            ctx.fill(left, top, left + boxW, top + boxH, 0xCC101722);
+            ctx.fill(left, top, left + boxW, top + 1, 0xFF6B4DFF);
+            for (int i = 0; i < lines.size(); i++) {
+                int y = top + 3 + i * lineH;
+                CollectorLabelRow row = lines.get(i);
+                if (!row.stack().isEmpty()) ctx.drawItem(row.stack(), left + 3, y - 1);
+                ctx.drawTextWithShadow(client.textRenderer, Text.literal(row.label()), left + 22, y + 4, 0xFFEDE8FF);
+            }
+            matrices.popMatrix();
+        }
+    }
+
+    private static Vec3d projectToScreen(Vec3d worldPos, int screenWidth, int screenHeight) {
+        if (lastWorldPositionMatrix == null || lastWorldProjectionMatrix == null) return null;
+        Vec3d camPos = MinecraftClient.getInstance().getEntityRenderDispatcher().camera.getCameraPos();
+        projectVec.set(
+                (float) (worldPos.x - camPos.x),
+                (float) (worldPos.y - camPos.y),
+                (float) (worldPos.z - camPos.z),
+                1.0f);
+        projectVec.mul(lastWorldPositionMatrix);
+        projectVec.mul(lastWorldProjectionMatrix);
+        if (projectVec.w <= 0.0f) return null;
+        float ndcX = projectVec.x / projectVec.w;
+        float ndcY = projectVec.y / projectVec.w;
+        if (Math.abs(ndcX) > 1.2f || Math.abs(ndcY) > 1.2f) return null;
+        double sx = (ndcX + 1.0f) * 0.5f * screenWidth;
+        double sy = (1.0f - ndcY) * 0.5f * screenHeight;
+        return new Vec3d(sx, sy, projectVec.z / projectVec.w);
+    }
+
+    private static ItemStack stackForItemId(String itemId) {
+        Item item = Registries.ITEM.get(Identifier.of(itemId));
+        return item == null ? ItemStack.EMPTY : item.getDefaultStack();
+    }
+
+    private static String itemLabel(String itemId) {
+        if (itemId == null) return "";
+        Item item = Registries.ITEM.get(Identifier.of(itemId));
+        return item == null ? itemId : item.getName().getString();
+    }
+
+    private static List<String> splitLines(String raw) {
+        if (raw == null || raw.isBlank()) return List.of();
+        List<String> out = new ArrayList<>();
+        for (String line : raw.split("\\n")) {
+            if (!line.isBlank()) out.add(line.trim());
+        }
+        return out;
     }
 
     private static boolean isFarChestOutline(BlockPos playerPos, BlockPos chestPos) {
@@ -238,27 +562,54 @@ public class WorldHighlightRenderer {
         if (!world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) return null;
         long key = pos.asLong();
         long now = System.currentTimeMillis();
+        boolean watchedShulker = isWatchedShulkerAnimation(key, now);
+        boolean pendingPlacement = isPendingPlacedContainer(key, now);
         ChestXrayCache cached = chestXrayCache.get(key);
-        if (cached != null && now - cached.validatedAtMs() < CHEST_XRAY_VALIDATE_MS) return cached;
-        if (!(world.getBlockEntity(pos) instanceof Inventory)) {
-            ChestXrayCache invalid = new ChestXrayCache(pos, null, now, false);
-            chestXrayCache.put(key, invalid);
-            return invalid;
+        // Short TTL for invalid entries so newly placed blocks are detected quickly
+        long ttl = cached == null ? CHEST_XRAY_VALIDATE_MS
+                : !cached.valid() ? (pendingPlacement ? SHULKER_ANIMATION_VALIDATE_MS : 200L)
+                : (cached.animating() || watchedShulker || pendingPlacement) ? SHULKER_ANIMATION_VALIDATE_MS
+                : CHEST_XRAY_VALIDATE_MS;
+        if (cached != null && now - cached.validatedAtMs() < ttl) return cached;
+        var be = world.getBlockEntity(pos);
+        if (!(be instanceof Inventory)) {
+            chestXrayCache.put(key, new ChestXrayCache(pos, null, now, false, false, false));
+            return chestXrayCache.get(key);
         }
-        ChestXrayCache fresh = new ChestXrayCache(pos, getInflatedContainerBounds(world, pos), now, true);
+        boolean collector = be instanceof ShulkerBoxBlockEntity shulker
+                && shulker.getComponents().get(DataComponentTypes.CUSTOM_DATA) != null
+                && shulker.getComponents().get(DataComponentTypes.CUSTOM_DATA).copyNbt().getBoolean("gather_collector", false);
+        boolean animating = be instanceof ShulkerBoxBlockEntity shulker
+                && (watchedShulker || shulker.getAnimationStage() != ShulkerBoxBlockEntity.AnimationStage.CLOSED);
+        ChestXrayCache fresh = new ChestXrayCache(pos, getInflatedContainerBounds(world, pos), now, true, collector, animating);
         chestXrayCache.put(key, fresh);
         return fresh;
     }
 
+    private static boolean isWatchedShulkerAnimation(long posLong, long now) {
+        Long until = shulkerAnimationWatchUntil.get(posLong);
+        if (until == null) return false;
+        if (until >= now) return true;
+        shulkerAnimationWatchUntil.remove(posLong);
+        return false;
+    }
+
+    private static boolean isPendingPlacedContainer(long posLong, long now) {
+        Long until = pendingPlacedContainerUntil.get(posLong);
+        if (until == null) return false;
+        if (until >= now) return true;
+        pendingPlacedContainerUntil.remove(posLong);
+        return false;
+    }
+
     private static void drawXrayContainerBox(VertexConsumer quads, MatrixStack matrices,
-                                             Vec3d camPos, ChestXrayCache cache, int fillArgb, int edgeArgb) {
-        BlockPos pos = cache.pos();
-        Box bounds = cache.bounds();
+                                             Vec3d camPos, BlockPos pos, Box bounds, int fillArgb, int edgeArgb,
+                                             boolean withEdges) {
         matrices.push();
         matrices.translate(pos.getX() - camPos.x, pos.getY() - camPos.y, pos.getZ() - camPos.z);
         Matrix4f matrix = matrices.peek().getPositionMatrix();
         drawCuboid(quads, matrix, bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ, fillArgb);
-        drawContainerEdges(quads, matrix, bounds, edgeArgb);
+        if (withEdges) drawContainerEdges(quads, matrix, bounds, edgeArgb);
         matrices.pop();
     }
 
@@ -326,17 +677,28 @@ public class WorldHighlightRenderer {
         quads.vertex(matrix, (float) x, (float) y, (float) z).color(argb);
     }
 
-    private static void drawFallbackContainerBox(VertexConsumer lines, MatrixStack matrices, ClientWorld world,
-                                                 Vec3d camPos, BlockPos pos, int lineArgb) {
-        VoxelShape shape = getContainerShape(world, pos);
+    // shape coords come from cache.bounds() which already includes CONTAINER_OUTLINE_INFLATE
+    private static VoxelShape shapeFromBounds(Box b) {
+        return VoxelShapes.cuboid(b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ);
+    }
+
+    private static void drawFallbackContainerBox(VertexConsumer lines, MatrixStack matrices,
+                                                 Vec3d camPos, BlockPos pos, VoxelShape shape, int lineArgb) {
         matrices.push();
         matrices.translate(pos.getX() - camPos.x, pos.getY() - camPos.y, pos.getZ() - camPos.z);
-        matrices.translate(-CONTAINER_OUTLINE_INFLATE, -CONTAINER_OUTLINE_INFLATE, -CONTAINER_OUTLINE_INFLATE);
-        matrices.scale(1.0f + (float) CONTAINER_OUTLINE_INFLATE * 2.0f,
-                1.0f + (float) CONTAINER_OUTLINE_INFLATE * 2.0f,
-                1.0f + (float) CONTAINER_OUTLINE_INFLATE * 2.0f);
-        VertexRendering.drawOutline(matrices, lines, shape, 0.0, 0.0, 0.0, lineArgb, 1.0f);
+        VertexRendering.drawOutline(matrices, lines, shape, 0.0, 0.0, 0.0, lineArgb, 2.5f);
         matrices.pop();
+    }
+
+    private static VoxelShape getHighlightShape(ClientWorld world, BlockPos pos) {
+        long key = pos.asLong();
+        VoxelShape cached = highlightShapeCache.get(key);
+        if (cached != null) return cached;
+        BlockState bs = world.getBlockState(pos);
+        VoxelShape shape = bs.getOutlineShape(world, pos);
+        if (shape.isEmpty()) shape = VoxelShapes.fullCube();
+        highlightShapeCache.put(key, shape);
+        return shape;
     }
 
     private static VoxelShape getContainerShape(ClientWorld world, BlockPos pos) {
@@ -381,6 +743,7 @@ public class WorldHighlightRenderer {
     // ─── NEEDED BLOCK HIGHLIGHTS ─────────────────────────────────────────────
 
     public static void renderNeededBlockXray(Camera camera) {
+        if (!GatherState.isServerXrayAllowed()) return;
         if (!GatherSettings.get().enabled || !GatherSettings.get().highlightEnabled || !GatherSettings.get().blockXray) return;
         MinecraftClient client = MinecraftClient.getInstance();
         ClientWorld world = client.world;
@@ -390,9 +753,9 @@ public class WorldHighlightRenderer {
         if (xrayLayer == null) return;
 
         GatherState state = GatherState.get();
-        if (state.getNeeded().isEmpty()) return;
+        if (!state.hasNeeded()) return;
 
-        int nodeCount = state.getNodes().size();
+        int nodeCount = state.getTotalNodeCount();
         if (nodeCount != cachedNodeCount) {
             cachedNodeCount = nodeCount;
             cachedNeededBlocks = computeNeededBlocks(state);
@@ -405,7 +768,14 @@ public class WorldHighlightRenderer {
         updateScanJobForPlayer(playerPos, now, cachedHighlights == null);
         processScanJob(world, cachedNeededBlocks);
         if (cachedHighlights == null || cachedHighlights.isEmpty()) return;
-        cachedHighlights.removeIf(pos -> !cachedNeededBlocks.contains(world.getBlockState(pos).getBlock()));
+        if (now - lastHighlightValidatedMs > HIGHLIGHT_VALIDATE_INTERVAL_MS) {
+            lastHighlightValidatedMs = now;
+            cachedHighlights.removeIf(pos -> !cachedNeededBlocks.contains(world.getBlockState(pos).getBlock()));
+            retainSetBuf.clear();
+            for (BlockPos pos : cachedHighlights) retainSetBuf.add(pos.asLong());
+            highlightShapeCache.keySet().retainAll(retainSetBuf);
+            retainSetBuf.clear();
+        }
         if (cachedHighlights.isEmpty()) return;
 
         long time = System.currentTimeMillis();
@@ -428,8 +798,8 @@ public class WorldHighlightRenderer {
         Vec3d camPos = camera.getCameraPos();
         boolean drew = false;
         for (BlockPos pos : visibleHighlights()) {
-            VoxelShape shape = world.getBlockState(pos).getOutlineShape(world, pos);
-            Box bounds = (shape.isEmpty() ? VoxelShapes.fullCube() : shape).getBoundingBox()
+            VoxelShape shape = getHighlightShape(world, pos);
+            Box bounds = shape.getBoundingBox()
                     .expand(OUTLINE_EPSILON)
                     .offset(pos.getX(), pos.getY(), pos.getZ());
             matrices.push();
@@ -446,7 +816,7 @@ public class WorldHighlightRenderer {
     private static void renderNeededBlockHighlights(GatherState state, ClientWorld world,
                                                     MinecraftClient client, Vec3d camPos,
                                                     VertexConsumerProvider consumers, MatrixStack matrices) {
-        int nodeCount = state.getNodes().size();
+        int nodeCount = state.getTotalNodeCount();
         if (nodeCount != cachedNodeCount) {
             cachedNodeCount = nodeCount;
             cachedNeededBlocks = computeNeededBlocks(state);
@@ -462,7 +832,14 @@ public class WorldHighlightRenderer {
 
         if (cachedHighlights == null || cachedHighlights.isEmpty()) return;
 
-        cachedHighlights.removeIf(pos -> !cachedNeededBlocks.contains(world.getBlockState(pos).getBlock()));
+        if (now - lastHighlightValidatedMs > HIGHLIGHT_VALIDATE_INTERVAL_MS) {
+            lastHighlightValidatedMs = now;
+            cachedHighlights.removeIf(pos -> !cachedNeededBlocks.contains(world.getBlockState(pos).getBlock()));
+            retainSetBuf.clear();
+            for (BlockPos pos : cachedHighlights) retainSetBuf.add(pos.asLong());
+            highlightShapeCache.keySet().retainAll(retainSetBuf);
+            retainSetBuf.clear();
+        }
 
         if (cachedHighlights.isEmpty()) return;
 
@@ -484,10 +861,8 @@ public class WorldHighlightRenderer {
             matrices.scale(1.0f + OUTLINE_EPSILON * 2.0f,
                     1.0f + OUTLINE_EPSILON * 2.0f,
                     1.0f + OUTLINE_EPSILON * 2.0f);
-            BlockState bs = world.getBlockState(pos);
-            VoxelShape shape = bs.getOutlineShape(world, pos);
-            if (shape.isEmpty()) shape = VoxelShapes.fullCube();
-            VertexRendering.drawOutline(matrices, consumer, shape, 0.0, 0.0, 0.0, argbColor, 1.0f);
+            VoxelShape shape = getHighlightShape(world, pos);
+            VertexRendering.drawOutline(matrices, consumer, shape, 0.0, 0.0, 0.0, argbColor, 2.5f);
             matrices.pop();
         }
         if (consumers instanceof VertexConsumerProvider.Immediate immediate) {
@@ -559,11 +934,13 @@ public class WorldHighlightRenderer {
         List<BlockPos> highlights = preserveExistingHighlights && cachedHighlights != null
                 ? new ArrayList<>(cachedHighlights)
                 : new ArrayList<>();
+        Set<Long> highlightSet = new HashSet<>(highlights.size());
+        for (BlockPos pos : highlights) highlightSet.add(pos.asLong());
         if (!preserveExistingHighlights || highlightRampStartedAtMs == 0L) {
             highlightRampStartedAtMs = System.currentTimeMillis();
         }
         scanJob = new ScanJob(origin, radius, clampedVerticalRadius, neededHash,
-                buildSectionQueue(origin, radius, clampedVerticalRadius), highlights);
+                buildSectionQueue(origin, radius, clampedVerticalRadius), highlights, highlightSet);
         cachedHighlights = scanJob.highlights();
     }
 
@@ -581,7 +958,7 @@ public class WorldHighlightRenderer {
             lastPlayerPos = playerPos;
             currentChunkEnteredAtMs = now;
             lastVerticalExpandChunk = null;
-            startScanJob(playerPos, cachedNeededBlocks, INITIAL_VERTICAL_SCAN_RADIUS, false);
+            startScanJob(playerPos, cachedNeededBlocks, INITIAL_VERTICAL_SCAN_RADIUS, cachedHighlights != null);
             return;
         }
 
@@ -604,7 +981,7 @@ public class WorldHighlightRenderer {
             int verticalRadius = chunk.equals(lastVerticalExpandChunk)
                     ? GatherSettings.get().highlightRadius
                     : INITIAL_VERTICAL_SCAN_RADIUS;
-            startScanJob(playerPos, cachedNeededBlocks, verticalRadius, true);
+            startScanJob(playerPos, cachedNeededBlocks, verticalRadius, cachedHighlights != null);
         }
     }
 
@@ -641,8 +1018,10 @@ public class WorldHighlightRenderer {
         if (scanJob == null) return;
         int budget = Math.max(1, GatherSettings.get().highlightScanBudget);
         long now = System.currentTimeMillis();
+        pruneSectionScanCache(now);
         for (int i = 0; i < budget && !scanJob.pending().isEmpty(); i++) {
             SectionKey section = scanJob.pending().removeFirst();
+            if (!world.isChunkLoaded(section.x(), section.z())) continue;
             SectionScanCache cached = sectionScanCache.get(section);
             List<BlockPos> positions;
             if (cached != null
@@ -654,11 +1033,17 @@ public class WorldHighlightRenderer {
                 sectionScanCache.put(section, new SectionScanCache(scanJob.neededHash(), now, positions));
             }
             addPositionsInRadius(scanJob.highlights(), positions, scanJob.origin(),
-                    scanJob.radius(), scanJob.verticalRadius());
+                    scanJob.radius(), scanJob.verticalRadius(), scanJob.highlightSet());
         }
-        applyHighlightLimit(scanJob.highlights(), scanJob.origin());
+        applyHighlightLimit(scanJob.highlights(), scanJob.highlightSet(), scanJob.origin());
         cachedHighlights = scanJob.highlights();
         if (scanJob.pending().isEmpty()) scanJob = null;
+    }
+
+    private static void pruneSectionScanCache(long now) {
+        if (now - lastSectionCachePruneMs < SECTION_CACHE_PRUNE_INTERVAL_MS) return;
+        lastSectionCachePruneMs = now;
+        sectionScanCache.entrySet().removeIf(entry -> now - entry.getValue().scannedAtMs() >= SECTION_CACHE_TTL_MS);
     }
 
     private static List<BlockPos> scanSection(ClientWorld world, SectionKey section, Set<Block> neededBlocks) {
@@ -684,7 +1069,8 @@ public class WorldHighlightRenderer {
     }
 
     private static void addPositionsInRadius(List<BlockPos> result, List<BlockPos> positions,
-                                             BlockPos origin, int radius, int verticalRadius) {
+                                             BlockPos origin, int radius, int verticalRadius,
+                                             Set<Long> existing) {
         int ox = origin.getX();
         int oy = origin.getY();
         int oz = origin.getZ();
@@ -692,17 +1078,18 @@ public class WorldHighlightRenderer {
             if (Math.abs(pos.getX() - ox) > radius) continue;
             if (Math.abs(pos.getY() - oy) > verticalRadius) continue;
             if (Math.abs(pos.getZ() - oz) > radius) continue;
-            if (!result.contains(pos)) result.add(pos);
+            if (existing.add(pos.asLong())) result.add(pos);
         }
     }
 
-    private static void applyHighlightLimit(List<BlockPos> result, BlockPos origin) {
+    private static void applyHighlightLimit(List<BlockPos> result, Set<Long> existing, BlockPos origin) {
         int limit = GatherSettings.get().maxBlockHighlights;
         if (limit > 0 && result.size() > limit) {
             int ox = origin.getX(), oy = origin.getY(), oz = origin.getZ();
             result.sort((a, b) -> Integer.compare(
                     highlightDistanceScore(a, ox, oy, oz),
                     highlightDistanceScore(b, ox, oy, oz)));
+            for (int i = limit; i < result.size(); i++) existing.remove(result.get(i).asLong());
             result.subList(limit, result.size()).clear();
         }
     }

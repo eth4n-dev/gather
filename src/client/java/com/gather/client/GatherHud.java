@@ -4,11 +4,15 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+
+import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.TagKey;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
@@ -17,12 +21,17 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class GatherHud {
-
     private static final long FLASH_MS   = 800;
     private static final long STAY_MS    = 500;
     private static final long FADE_IN_MS = 350;
     private static final long INVENTORY_SNAPSHOT_CACHE_MS = 50;
     private static final long HUD_MODEL_REFRESH_MS = 100;
+
+    private static final long TOAST_FADEIN_MS  = 250;
+    private static final long TOAST_HOLD_MS    = 1800;
+    private static final long TOAST_FADEOUT_MS = 400;
+    private static final long TOAST_TOTAL_MS   = TOAST_FADEIN_MS + TOAST_HOLD_MS + TOAST_FADEOUT_MS;
+    private static final int  MAX_TOASTS       = 4;
 
     private static final int ROW_H_GOAL = 22; // goal rows (two text lines + progress bar)
     private static final int ROW_H_MAT  = 18; // material rows
@@ -40,11 +49,20 @@ public class GatherHud {
     private static long cachedModelAtMs = 0L;
     private static boolean modelDirty = true;
 
+    // Goal completion sound + toast
+    private record ToastEntry(String itemName, long startMs) {}
+    private static final List<ToastEntry> toastQueue = new ArrayList<>();
+    private static Set<String> knownReadyGoals = new HashSet<>();
+    private static boolean hudFirstBuild = true;
+    private static final Map<Item, Set<TagKey<Item>>> ITEM_TAG_CACHE = new HashMap<>();
+    private static final Map<String, Item> ITEM_ID_CACHE = new HashMap<>();
+    private static final Set<String> currentReadyBuf = new HashSet<>();
+
     private record InventoryCountEntry(long expiresAtMs, int count) {}
     private record InventorySnapshot(long expiresAtMs, Map<Item, Integer> counts) {}
-    private record MatEntry(String itemId, int rawNeeded, int have, long firstSeenMs, long completionStartMs) {}
-    private record HintEntry(String rootId, int craftable, int needed, List<String> leafIds) {}
-    private record GoalEntry(int listIndex, GatherState.RootInfo root, boolean header) {}
+    private record MatEntry(String itemId, ItemStack stack, int rawNeeded, int have, long firstSeenMs, long completionStartMs) {}
+    private record HintEntry(String rootId, ItemStack rootStack, int craftable, int needed, List<ItemStack> leafStacks) {}
+    private record GoalEntry(int listIndex, GatherState.RootInfo root, ItemStack stack, String itemName, boolean header) {}
     private record HudModel(List<GatherList> lists, List<GoalEntry> goalEntries,
                             List<MatEntry> matEntries, List<HintEntry> hints) {
         static HudModel empty() {
@@ -62,10 +80,31 @@ public class GatherHud {
         inventorySnapshot = null;
     }
 
+    public static boolean isCollectorShulker(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        if (!(stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock)) return false;
+        var cd = stack.get(DataComponentTypes.CUSTOM_DATA);
+        return cd != null && cd.copyNbt().getBoolean("gather_collector", false);
+    }
+
+    public static void reset() {
+        knownReadyGoals.clear();
+        toastQueue.clear();
+        hudFirstBuild = true;
+        animMats.clear();
+        modelDirty = true;
+        inventoryCountCache.clear();
+        inventorySnapshot = null;
+    }
+
     private static void onHudRender(DrawContext context, net.minecraft.client.render.RenderTickCounter tickCounter) {
-        if (!GatherSettings.get().enabled || !GatherSettings.get().showHud) return;
+        if (!GatherSettings.get().enabled) return;
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null || client.getOverlay() != null) return;
+
+        WorldHighlightRenderer.renderCollectorLabels(context);
+
+        if (!GatherSettings.get().showHud) return;
 
         GatherState state = GatherState.get();
         long now = System.currentTimeMillis();
@@ -149,12 +188,13 @@ public class GatherHud {
             int bh = 38;
             int bx = settings.layoutManualScanX < 0 ? sw / 2 - bw / 2 : settings.layoutManualScanX;
             int by = settings.layoutManualScanY;
+            int textCenterX = bx + bw / 2;
             context.fill(bx, by, bx + bw, by + bh, 0xCC001A1A);
             context.fill(bx, by, bx + bw, by + 1, 0xFFFF9944);
             context.fill(bx, by + bh - 1, bx + bw, by + bh, 0x88AA6622);
-            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line1), sw / 2, by + 4, 0xFFFFCC44);
-            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line2), sw / 2, by + 15, 0xFFCCBB88);
-            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line3), sw / 2, by + 26, manualCount == 0 ? 0xFF776655 : 0xFFFFDD99);
+            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line1), textCenterX, by + 4, 0xFFFFCC44);
+            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line2), textCenterX, by + 15, 0xFFCCBB88);
+            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line3), textCenterX, by + 26, manualCount == 0 ? 0xFF776655 : 0xFFFFDD99);
         }
 
         // Small top-right badge for persistent scan modes
@@ -196,42 +236,111 @@ public class GatherHud {
                     if (dist < nearestDistSq) { nearestDistSq = dist; nearest = pos; }
                 }
 
-                Item finderItem = Registries.ITEM.get(Identifier.of(finderItemId));
+                Item finderItem = ITEM_ID_CACHE.computeIfAbsent(finderItemId, k -> Registries.ITEM.get(Identifier.of(k)));
                 String itemDisplayName = finderItem != null ? finderItem.getName().getString() : finderItemId;
+                int totalCount = state.getTrackedChestCountMatching(finderItemId)
+                               + state.getManualChestCountMatching(finderItemId);
+                int chestCount = finderChests.size();
 
-                String arrowStr, distStr;
-                if (nearest == null) {
-                    arrowStr = "?"; distStr = "no data";
-                } else {
-                    int dist = (int)Math.sqrt(nearestDistSq);
+                double relativeAngle = Double.NaN;
+                String distStr = "";
+                if (nearest != null) {
+                    int dist = (int) Math.sqrt(nearestDistSq);
                     distStr = dist + "m";
                     double dx = nearest.getX() - playerPos.getX();
                     double dz = nearest.getZ() - playerPos.getZ();
                     double chestYaw = Math.toDegrees(Math.atan2(-dx, dz));
-                    double relative = ((chestYaw - client.player.getYaw()) % 360 + 540) % 360 - 180;
-                    int idx = (((int)Math.round(relative / 45.0)) % 8 + 8) % 8;
-                    arrowStr = new String[]{"↑","↗","→","↘","↓","↙","←","↖"}[idx];
+                    relativeAngle = ((chestYaw - client.player.getYaw()) % 360 + 540) % 360 - 180;
                 }
 
+                // Info panel
                 int maxNameW = 90;
-                String dispName = itemDisplayName;
-                while (client.textRenderer.getWidth(dispName) > maxNameW && dispName.length() > 1)
-                    dispName = dispName.substring(0, dispName.length() - 1);
-                if (!dispName.equals(itemDisplayName)) dispName += "..";
+                String dispName;
+                if (client.textRenderer.getWidth(itemDisplayName) > maxNameW) {
+                    dispName = client.textRenderer.trimToWidth(itemDisplayName,
+                            maxNameW - client.textRenderer.getWidth("..")) + "..";
+                } else {
+                    dispName = itemDisplayName;
+                }
 
-                String line1 = "FIND: " + dispName;
-                String line2 = arrowStr + " " + distStr;
-                int panelW = Math.max(settings.layoutFinderW, Math.max(client.textRenderer.getWidth(line1),
-                                      client.textRenderer.getWidth(line2)) + 14);
+                String navLine = nearest == null ? "not in scanned chests" : distStr;
+                String cntLine = chestCount == 0 ? "scan chests to locate"
+                        : "x" + totalCount + "  in " + chestCount + " chest" + (chestCount == 1 ? "" : "s");
+
+                int iconW  = finderItem != null ? 20 : 0;
+                int textW  = Math.max(client.textRenderer.getWidth(dispName),
+                             Math.max(client.textRenderer.getWidth(navLine),
+                                      client.textRenderer.getWidth(cntLine)));
+                int panelW = Math.max(settings.layoutFinderW, iconW + textW + 12);
                 int panelX = settings.layoutFinderX < 0 ? sw - 4 - panelW : settings.layoutFinderX;
                 int panelY = settings.layoutFinderY;
+                int panelH = 38;
 
-                context.fill(panelX, panelY, panelX + panelW, panelY + 24, 0xCC1A0000);
+                context.fill(panelX, panelY, panelX + panelW, panelY + panelH, 0xCC1A0000);
                 context.fill(panelX, panelY, panelX + panelW, panelY + 1, 0xFFFF4444);
-                context.drawTextWithShadow(client.textRenderer, Text.literal(line1),
-                        panelX + 4, panelY + 3, 0xFFFF9999);
-                context.drawTextWithShadow(client.textRenderer, Text.literal(line2),
-                        panelX + 4, panelY + 13, 0xFFFF4444);
+
+                int tx = panelX + 4;
+                if (finderItem != null) {
+                    context.drawItem(finderItem.getDefaultStack(), panelX + 2, panelY + 3);
+                    tx = panelX + 22;
+                }
+                context.drawTextWithShadow(client.textRenderer, Text.literal(dispName), tx, panelY + 4,  0xFFFF9999);
+                context.drawTextWithShadow(client.textRenderer, Text.literal(cntLine),  tx, panelY + 15, chestCount == 0 ? 0xFF554433 : 0xFFAA7744);
+                context.drawTextWithShadow(client.textRenderer, Text.literal(navLine),  tx, panelY + 26, nearest == null ? 0xFF664433 : 0xFFFF5533);
+
+                // Orbiting chevron near crosshair
+                if (!Double.isNaN(relativeAngle)) {
+                    int sh = client.getWindow().getScaledHeight();
+                    float cx = sw / 2.0f, cy = sh / 2.0f;
+                    float radius = 20f;
+                    double relRad = Math.toRadians(relativeAngle);
+                    float ax = cx + (float)(Math.sin(relRad) * radius);
+                    float ay = cy - (float)(Math.cos(relRad) * radius);
+                    float pulse = 0.65f + 0.35f * (float)Math.sin(now / 350.0);
+                    int alpha = (int)(pulse * 255) << 24;
+                    int chevColor = (alpha & 0xFF000000) | 0x00FF6644;
+                    var mat = context.getMatrices();
+                    mat.pushMatrix();
+                    mat.translate(ax, ay);
+                    mat.rotate((float)Math.toRadians(relativeAngle - 90));
+                    int tw = client.textRenderer.getWidth(">");
+                    context.drawTextWithShadow(client.textRenderer, Text.literal(">"), -tw / 2, -4, chevColor);
+                    mat.popMatrix();
+                    // Distance label further out along same direction, in screen space
+                    float labelRadius = radius + 14f;
+                    float lx2 = cx + (float)(Math.sin(relRad) * labelRadius);
+                    float ly2 = cy - (float)(Math.cos(relRad) * labelRadius);
+                    int distLabelColor = (alpha & 0xFF000000) | 0x00BBCCDD;
+                    int dw = client.textRenderer.getWidth(distStr);
+                    context.drawTextWithShadow(client.textRenderer, Text.literal(distStr),
+                            (int)lx2 - dw / 2, (int)ly2 - 4, distLabelColor);
+                }
+            }
+        }
+
+        // === COMPLETION TOASTS ===
+        toastQueue.removeIf(t -> now - t.startMs() > TOAST_TOTAL_MS);
+        if (!toastQueue.isEmpty()) {
+            int sw2 = client.getWindow().getScaledWidth();
+            int toastCenterX = settings.layoutToastX < 0 ? sw2 / 2 : settings.layoutToastX + 100;
+            for (int ti = toastQueue.size() - 1; ti >= 0; ti--) {
+                ToastEntry toast = toastQueue.get(ti);
+                long elapsed = now - toast.startMs();
+                float alpha;
+                if (elapsed < TOAST_FADEIN_MS) alpha = (float) elapsed / TOAST_FADEIN_MS;
+                else if (elapsed < TOAST_FADEIN_MS + TOAST_HOLD_MS) alpha = 1.0f;
+                else alpha = 1.0f - (float)(elapsed - TOAST_FADEIN_MS - TOAST_HOLD_MS) / TOAST_FADEOUT_MS;
+                alpha = Math.max(0f, Math.min(1f, alpha));
+                int a = (int)(alpha * 255);
+                String msg = "✔ " + toast.itemName();
+                int tw2 = client.textRenderer.getWidth(msg);
+                int pw = tw2 + 18;
+                int px = toastCenterX - pw / 2;
+                int py = settings.layoutToastY + (toastQueue.size() - 1 - ti) * 18;
+                context.fill(px, py, px + pw, py + 14, (a << 24) | 0x001A00);
+                context.fill(px, py, px + pw, py + 1, (a << 24) | 0x33CC66);
+                context.fill(px, py + 13, px + pw, py + 14, (a << 24) | 0x1A6633);
+                context.drawTextWithShadow(client.textRenderer, Text.literal(msg), px + 9, py + 3, (a << 24) | 0xAAFFCC);
             }
         }
 
@@ -264,30 +373,37 @@ public class GatherHud {
             }
 
             GatherState.RootInfo root = entry.root();
-            Item item = Registries.ITEM.get(Identifier.of(root.itemId()));
-            if (item == null) { y += ROW_H_GOAL; continue; }
+            ItemStack stack = entry.stack();
+            if (stack.isEmpty()) { y += ROW_H_GOAL; continue; }
 
             int have      = root.effectiveHave();
             int needed    = root.needed();
             boolean ready = root.ready();
 
             context.fill(x, y, x + 80, y + ROW_H_GOAL - 2, ready ? 0xAA002200 : 0xAA00001A);
-            context.drawItem(item.getDefaultStack(), x + 1, y + 2);
+            context.drawItem(stack, x + 1, y + 2);
 
-            String haveBadge = have + "/" + needed;
+            String haveBadge;
+            int haveBadgeCol;
+            if (have > needed) {
+                haveBadge = "+" + (have - needed);
+                haveBadgeCol = 0xFF44FFAA;
+            } else {
+                haveBadge = have + "/" + needed;
+                haveBadgeCol = have >= needed ? 0xFF88FF88 : (have > 0 ? 0xFFFFFF55 : 0xFFFF6666);
+            }
             int haveBadgeW = client.textRenderer.getWidth(haveBadge);
-            int haveBadgeCol = have >= needed ? 0xFF88FF88 : (have > 0 ? 0xFFFFFF55 : 0xFFFF6666);
             context.drawTextWithShadow(client.textRenderer,
                     Text.literal(haveBadge), x + 78 - haveBadgeW, y + 2, haveBadgeCol);
 
             int nameMaxW = 78 - 19 - haveBadgeW - 3;
-            String fullName = item.getName().getString();
-            String name = fullName;
-            if (client.textRenderer.getWidth(name) > nameMaxW) {
-                while (!name.isEmpty() && client.textRenderer.getWidth(name + "...") > nameMaxW) {
-                    name = name.substring(0, name.length() - 1);
-                }
-                name += "...";
+            String fullName = entry.itemName();
+            String name;
+            if (client.textRenderer.getWidth(fullName) > nameMaxW) {
+                name = client.textRenderer.trimToWidth(fullName,
+                        nameMaxW - client.textRenderer.getWidth("...")) + "...";
+            } else {
+                name = fullName;
             }
             context.drawTextWithShadow(client.textRenderer,
                     Text.literal(name), x + 19, y + 2, ready ? 0xFFEEFFEE : 0xFFCCCCCC);
@@ -328,8 +444,8 @@ public class GatherHud {
             int row = numCols > 0 ? mi % matRowsPerCol : mi;
             if (col >= numCols) break;
             MatEntry entry = matEntries.get(mi);
-            Item item = Registries.ITEM.get(Identifier.of(entry.itemId()));
-            if (item == null) continue;
+            ItemStack stack = entry.stack();
+            if (stack.isEmpty()) continue;
 
             int have = entry.have();
             int need = entry.rawNeeded();
@@ -345,7 +461,7 @@ public class GatherHud {
                 float pulse = (float)(0.5 + 0.5 * Math.sin(now * 0.020));
                 int bgG = (int)(0x33 + pulse * 0x55);
                 context.fill(rx, ry, rx + 80, ry + ROW_H_MAT - 2, (a << 24) | (bgG << 8));
-                context.drawItem(item.getDefaultStack(), rx + 1, ry);
+                context.drawItem(stack, rx + 1, ry);
                 context.drawTextWithShadow(client.textRenderer,
                         Text.literal(need + "/" + need), rx + 19, ry + 4, (a << 24) | 0x55FF55);
                 context.fill(rx, ry + ROW_H_MAT - 2, rx + 80, ry + ROW_H_MAT - 1, (a / 4 << 24) | 0x000000);
@@ -355,7 +471,7 @@ public class GatherHud {
                 int bgBase  = have >= need ? 0x00AA44 : 0x220033;
                 int bgAlpha = (int)(alpha * 0x88);
                 context.fill(rx, ry, rx + 80, ry + ROW_H_MAT - 2, (bgAlpha << 24) | bgBase);
-                context.drawItem(item.getDefaultStack(), rx + 1, ry);
+                context.drawItem(stack, rx + 1, ry);
                 if (alpha < 1f) {
                     int maskA = (int)((1f - alpha) * 230);
                     context.fill(rx + 1, ry, rx + 17, ry + 16, maskA << 24);
@@ -376,39 +492,54 @@ public class GatherHud {
             context.drawTextWithShadow(client.textRenderer,
                     Text.literal("§acraft ready"), hintStartX + 2, hintTopY + 2, 0xFF66CC66);
 
+            int arrowW = client.textRenderer.getWidth("->");
+            // Pre-pass: find max row width so all rows share same width
+            int maxRowW = 40;
+            for (HintEntry hint : hints) {
+                int lc = hint.leafStacks().size();
+                int leafEnd = 1 + lc * 16 - Math.max(0, lc - 1);
+                int cntW = client.textRenderer.getWidth("x" + hint.craftable());
+                int rw = leafEnd + 2 + arrowW + 2 + 16 + 2 + cntW + 3;
+                if (rw > maxRowW) maxRowW = rw;
+            }
+
             for (int hi = 0; hi < hints.size(); hi++) {
                 int col = hintCols > 0 ? hi / hintRowsPerCol : 0;
                 int row = hintCols > 0 ? hi % hintRowsPerCol : hi;
                 if (col >= hintCols) break;
                 HintEntry hint = hints.get(hi);
-                Item rootItem = Registries.ITEM.get(Identifier.of(hint.rootId()));
-                if (rootItem == null) continue;
+                ItemStack rootStack = hint.rootStack();
+                if (rootStack.isEmpty()) continue;
 
                 x = hintStartX + col * hintColW;
                 y = hintRowStartY + row * ROW_H_HINT;
 
                 float pulse = (float)(0.5 + 0.5 * Math.sin(now * 0.003));
                 int bgG = (int)(0x22 + pulse * 0x33);
-                context.fill(x, y, x + 80, y + ROW_H_HINT - 2, (0xAA << 24) | (bgG << 8));
+                context.fill(x, y, x + maxRowW, y + ROW_H_HINT - 2, (0xAA << 24) | (bgG << 8));
 
                 // Up to 2 leaf icons on the left
-                List<String> leaves = hint.leafIds();
+                List<ItemStack> leafStacks = hint.leafStacks();
+                int lc = leafStacks.size();
                 int iconX = x + 1;
-                for (int li = 0; li < Math.min(2, leaves.size()); li++) {
-                    Item leafItem = Registries.ITEM.get(Identifier.of(leaves.get(li)));
-                    if (leafItem != null) context.drawItem(leafItem.getDefaultStack(), iconX, y + 2);
+                for (int li = 0; li < lc; li++) {
+                    ItemStack leafStack = leafStacks.get(li);
+                    if (!leafStack.isEmpty()) context.drawItem(leafStack, iconX, y + 2);
                     iconX += 15;
                 }
+                int leafEnd = x + 1 + lc * 16 - Math.max(0, lc - 1);
 
-                // Arrow
+                // Arrow — tight against last leaf icon
+                int arrowX = leafEnd + 2;
                 context.drawTextWithShadow(client.textRenderer,
-                        Text.literal("->"), x + 33, y + 6, 0xFF88CC88);
+                        Text.literal("->"), arrowX, y + 6, 0xFF88CC88);
 
                 // Root item icon + count
-                context.drawItem(rootItem.getDefaultStack(), x + 44, y + 2);
+                int rootX = arrowX + arrowW + 2;
+                context.drawItem(rootStack, rootX, y + 2);
                 String cnt = "x" + hint.craftable();
                 context.drawTextWithShadow(client.textRenderer,
-                        Text.literal(cnt), x + 62, y + 6, 0xFF88FF88);
+                        Text.literal(cnt), rootX + 17, y + 6, 0xFF88FF88);
             }
         }
     }
@@ -431,7 +562,8 @@ public class GatherHud {
             int inInv = it == null ? 0 : countInventoryTagAware(client, it);
             int inChests = countChests ? state.getTrackedChestCountMatching(id) : 0;
             int inManual = countChests ? 0 : state.getManualChestCountMatching(id);
-            return inInv + inChests + inManual;
+            int inCollectors = state.getCollectorChestCountMatching(id);
+            return inInv + inChests + inManual + inCollectors;
         };
 
         List<List<GatherState.RootInfo>> rootsPerList = new ArrayList<>();
@@ -439,8 +571,36 @@ public class GatherHud {
             rootsPerList.add(state.getRootsWithProgress(li, totalCounter));
         }
 
+        // Detect newly completed goals for sound + toast (only visible lists)
+        if (GatherSettings.get().goalSoundEnabled) {
+            currentReadyBuf.clear();
+            for (int li = 0; li < lists.size(); li++) {
+                if (lists.get(li).hudHidden) continue;
+                for (GatherState.RootInfo root : rootsPerList.get(li)) {
+                    if (root.effectiveHave() >= root.needed()) currentReadyBuf.add(li + ":" + root.itemId());
+                }
+            }
+            if (!hudFirstBuild) {
+                for (String key : currentReadyBuf) {
+                    if (!knownReadyGoals.contains(key)) {
+                        String itemId = key.substring(key.indexOf(':') + 1);
+                        Item completedItem = ITEM_ID_CACHE.computeIfAbsent(itemId, k -> Registries.ITEM.get(Identifier.of(k)));
+                        String itemName = completedItem != null ? completedItem.getName().getString() : itemId;
+                        if (toastQueue.size() < MAX_TOASTS) toastQueue.add(new ToastEntry(itemName, now));
+                        client.getSoundManager().play(
+                            PositionedSoundInstance.ui(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 1.2f));
+                    }
+                }
+            } else {
+                hudFirstBuild = false;
+            }
+            knownReadyGoals.clear();
+            knownReadyGoals.addAll(currentReadyBuf);
+        }
+
         Map<String, Integer> aggRaw = new LinkedHashMap<>();
         for (int li = 0; li < lists.size(); li++) {
+            if (lists.get(li).hudHidden) continue;
             state.getScaledIngredientLeaves(li, totalCounter)
                     .forEach((id, n) -> aggRaw.merge(id, n, Integer::sum));
         }
@@ -475,25 +635,40 @@ public class GatherHud {
             String id = e.getKey();
             long[] ae = e.getValue();
             if (ae[3] != 0 && now - ae[3] >= FLASH_MS) continue;
-            matEntries.add(new MatEntry(id, (int) ae[2], totalCounter.apply(id), ae[0], ae[3]));
+            Item matItem = ITEM_ID_CACHE.computeIfAbsent(id, k -> Registries.ITEM.get(Identifier.of(k)));
+            ItemStack matStack = matItem != null ? matItem.getDefaultStack() : ItemStack.EMPTY;
+            matEntries.add(new MatEntry(id, matStack, (int) ae[2], totalCounter.apply(id), ae[0], ae[3]));
         }
 
         List<HintEntry> hints = new ArrayList<>();
         for (int li = 0; li < lists.size(); li++) {
+            if (lists.get(li).hudHidden) continue;
             for (GatherState.RootInfo root : rootsPerList.get(li)) {
                 if (!root.ready() && root.craftableNow() > 0) {
-                    hints.add(new HintEntry(root.itemId(), root.craftableNow(), root.needed(),
-                            state.getLeafIdsForRoot(li, root.itemId())));
+                    Item rootItem = ITEM_ID_CACHE.computeIfAbsent(root.itemId(), k -> Registries.ITEM.get(Identifier.of(k)));
+                    ItemStack rootStack = rootItem != null ? rootItem.getDefaultStack() : ItemStack.EMPTY;
+                    List<String> leafIds = state.getLeafIdsForRoot(li, root.itemId());
+                    int leafCount = Math.min(2, leafIds.size());
+                    List<ItemStack> leafStacks = new ArrayList<>(leafCount);
+                    for (int k = 0; k < leafCount; k++) {
+                        Item leafItem = ITEM_ID_CACHE.computeIfAbsent(leafIds.get(k), id -> Registries.ITEM.get(Identifier.of(id)));
+                        leafStacks.add(leafItem != null ? leafItem.getDefaultStack() : ItemStack.EMPTY);
+                    }
+                    hints.add(new HintEntry(root.itemId(), rootStack, root.craftableNow(), root.needed(), leafStacks));
                 }
             }
         }
 
         List<GoalEntry> goalEntries = new ArrayList<>();
         for (int li = 0; li < lists.size(); li++) {
+            if (lists.get(li).hudHidden) continue;
             if (!rootsPerList.get(li).isEmpty()) {
-                goalEntries.add(new GoalEntry(li, null, true));
+                goalEntries.add(new GoalEntry(li, null, ItemStack.EMPTY, "", true));
                 for (GatherState.RootInfo root : rootsPerList.get(li)) {
-                    goalEntries.add(new GoalEntry(li, root, false));
+                    Item goalItem = ITEM_ID_CACHE.computeIfAbsent(root.itemId(), k -> Registries.ITEM.get(Identifier.of(k)));
+                    ItemStack goalStack = goalItem != null ? goalItem.getDefaultStack() : ItemStack.EMPTY;
+                    String goalName = goalItem != null ? goalItem.getName().getString() : root.itemId();
+                    goalEntries.add(new GoalEntry(li, root, goalStack, goalName, false));
                 }
             }
         }
@@ -528,11 +703,13 @@ public class GatherHud {
         if (cached != null && now < cached.expiresAtMs()) return cached.count();
         InventorySnapshot snapshot = inventorySnapshot(client, now);
 
-        String itemPath = Registries.ITEM.getId(item).getPath();
-        Set<String> expectedTagPaths = expectedTagPaths(itemPath);
-        Set<TagKey<Item>> typeTags = item.getRegistryEntry().streamTags()
-                .filter(tag -> expectedTagPaths.contains(tag.id().getPath()))
-                .collect(Collectors.toSet());
+        Set<TagKey<Item>> typeTags = ITEM_TAG_CACHE.computeIfAbsent(item, it -> {
+            String path = Registries.ITEM.getId(it).getPath();
+            Set<String> expectedPaths = expectedTagPaths(path);
+            return it.getRegistryEntry().streamTags()
+                    .filter(tag -> expectedPaths.contains(tag.id().getPath()))
+                    .collect(Collectors.toSet());
+        });
 
         int count = 0;
         for (Map.Entry<Item, Integer> entry : snapshot.counts().entrySet()) {

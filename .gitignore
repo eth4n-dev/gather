@@ -25,3 +25,4 @@ net/
 *.iml
 .DS_Store
 Thumbs.db
+bin/

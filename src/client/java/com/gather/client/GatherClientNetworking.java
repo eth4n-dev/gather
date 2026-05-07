@@ -2,6 +2,7 @@ package com.gather.client;
 
 import com.gather.network.*;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import java.util.HashSet;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -36,7 +37,22 @@ public class GatherClientNetworking {
                 } else {
                     state.addTrackedChests(payload.positions());
                 }
-                requestTrackedChests(state.getTrackedChests());
+                // Only request contents for chests we haven't fetched yet (Fix 2)
+                Set<Long> newChests = state.getTrackedChestsWithoutContents();
+                if (!newChests.isEmpty()) requestTrackedChests(newChests);
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(ChestDirtyPayload.ID, (payload, context) -> {
+            if (!GatherSettings.get().enabled) return;
+            context.client().execute(() -> {
+                GatherState state = GatherState.get();
+                long pos = payload.posLong();
+                WorldHighlightRenderer.evictChestXrayCache(pos);
+                if (state.getTrackedChests().contains(pos) || state.getManualChests().contains(pos)) {
+                    requestTrackedChests(new HashSet<>(java.util.List.of(pos)));
+                    WorldHighlightRenderer.markChestSetDirty();
+                }
             });
         });
 
@@ -51,6 +67,23 @@ public class GatherClientNetworking {
         ClientPlayNetworking.registerGlobalReceiver(CollectorStatePayload.ID, (payload, context) -> {
             if (!GatherSettings.get().enabled) return;
             context.client().execute(() -> GatherShulkerCollectorOverlay.applyServerState(payload));
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(com.gather.network.PlacedCollectorPositionsPayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                GatherState state = GatherState.get();
+                Set<Long> missingContents = new HashSet<>();
+                for (com.gather.network.PlacedCollectorPositionsPayload.Entry entry : payload.entries()) {
+                    if (!state.hasCollectorChestContents(entry.pos())) missingContents.add(entry.pos());
+                }
+                state.setCollectorPositions(payload.entries());
+                WorldHighlightRenderer.invalidateCollectorCache();
+                requestTrackedChests(missingContents);
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(com.gather.network.XrayPermissionPayload.ID, (payload, context) -> {
+            context.client().execute(() -> GatherState.setServerXrayAllowed(payload.allowed()));
         });
 
     }

@@ -29,6 +29,7 @@
     "java": ">=21"
   },
   "suggests": {
-    "modmenu": "*"
+    "modmenu": "*",
+    "whereisit": "*"
   }
 }

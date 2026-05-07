@@ -8,13 +8,22 @@ import org.lwjgl.glfw.GLFW;
 
 public class GatherKeyBindings {
 
+    private static final KeyBinding.Category CATEGORY =
+            KeyBinding.Category.create(Identifier.of(GatherMod.MOD_ID, "controls"));
+
     public static KeyBinding openMenu;
+    public static KeyBinding manualScanToggle;
 
     public static void register() {
         openMenu = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.gather.open_menu",
                 GLFW.GLFW_KEY_G,
-                KeyBinding.Category.create(Identifier.of(GatherMod.MOD_ID, "controls"))
+                CATEGORY
+        ));
+        manualScanToggle = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.gather.manual_scan_toggle",
+                GLFW.GLFW_KEY_V,
+                CATEGORY
         ));
     }
 }

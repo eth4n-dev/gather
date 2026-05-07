@@ -3,14 +3,18 @@ package com.gather.client.mixin;
 import com.gather.client.GatherClientNetworking;
 import com.gather.client.GatherSettings;
 import com.gather.client.GatherState;
+import com.gather.client.WorldHighlightRenderer;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ChestBlock;
+import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.block.enums.ChestType;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.inventory.Inventory;
+import net.minecraft.item.BlockItem;
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -31,18 +35,29 @@ public class UseBlockMixin {
         if (hand != Hand.MAIN_HAND) return;
         if (!GatherSettings.get().enabled) return;
         GatherState state = GatherState.get();
+        GatherSettings settings = GatherSettings.get();
 
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.world == null) return;
 
         BlockPos pos = hitResult.getBlockPos();
         BlockEntity be = mc.world.getBlockEntity(pos);
-        if (!(be instanceof Inventory)) return;
+        if (!(be instanceof Inventory)) {
+            watchLikelyContainerPlacement(player, hand, hitResult, state, settings);
+            return;
+        }
 
-        GatherSettings settings = GatherSettings.get();
         boolean manualTagClick = !settings.countChests && state.isChestScanMode();
         BlockPos rootPos = canonicalChestPos(mc.world, pos);
         BlockPos partnerPos = doubleChestPartner(mc.world, pos);
+        WorldHighlightRenderer.evictChestXrayCache(rootPos.asLong());
+        if (partnerPos != null) WorldHighlightRenderer.evictChestXrayCache(partnerPos.asLong());
+        if (mc.world.getBlockState(rootPos).getBlock() instanceof ShulkerBoxBlock) {
+            WorldHighlightRenderer.watchShulkerAnimation(rootPos.asLong());
+        }
+        if (player.isSneaking()) {
+            watchLikelyContainerPlacement(player, hand, hitResult, state, settings);
+        }
 
         if (!manualTagClick) {
             clearFinderIfOpening(state, rootPos, partnerPos);
@@ -58,6 +73,23 @@ public class UseBlockMixin {
             GatherClientNetworking.requestTrackedChests(java.util.Set.of(rootPos.asLong()));
         }
         cir.setReturnValue(ActionResult.SUCCESS);
+    }
+
+    private static void watchLikelyContainerPlacement(ClientPlayerEntity player, Hand hand, BlockHitResult hitResult,
+                                                       GatherState state, GatherSettings settings) {
+        ItemStack held = player.getStackInHand(hand);
+        if (!(held.getItem() instanceof BlockItem blockItem)) return;
+        if (!(blockItem.getBlock() instanceof ChestBlock || blockItem.getBlock() instanceof ShulkerBoxBlock)) return;
+
+        BlockPos placePos = hitResult.getBlockPos().offset(hitResult.getSide());
+        long encoded = placePos.asLong();
+        WorldHighlightRenderer.watchNewContainerPlacement(encoded);
+
+        if (settings.countChests) {
+            state.addTrackedChests(java.util.List.of(encoded));
+            GatherClientNetworking.requestTrackedChests(java.util.Set.of(encoded));
+            WorldHighlightRenderer.markChestSetDirty();
+        }
     }
 
     private static void clearFinderIfOpening(GatherState state, BlockPos rootPos, BlockPos partnerPos) {

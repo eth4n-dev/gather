@@ -27,6 +27,7 @@ public class WorldRendererMixin {
                                                    Vector4f fogColor,
                                                    boolean renderSky,
                                                    CallbackInfo ci) {
+        WorldHighlightRenderer.captureWorldMatrices(positionMatrix, projectionMatrix);
         if (!WorldHighlightRenderer.shouldRenderTailXray()) return;
         WorldHighlightRenderer.renderScannedContainerXray(camera);
         WorldHighlightRenderer.renderNeededBlockXray(camera);

@@ -9,5 +9,6 @@
   "gui.gather.no_items": "No items in list",
   "gui.gather.no_results": "No results",
   "key.gather.open_menu": "Open Gather",
-  "key.categories.gather": "Gather"
+  "key.gather.manual_scan_toggle": "Toggle Manual Scan",
+  "key.category.gather.controls": "Gather"
 }

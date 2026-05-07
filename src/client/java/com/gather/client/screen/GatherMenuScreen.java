@@ -8,11 +8,13 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.TagKey;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.*;
@@ -27,11 +29,16 @@ public class GatherMenuScreen extends Screen {
     private static final int ICON      = 16;
     private static final int BOTTOM_H  = 28;
     private static final int SUMMARY_H = 72;
-    private static final long MENU_ANIM_MS = 170L;
+    private static final long MENU_ANIM_MS = 320L;
+    private static final long MENU_ZOOM_OPEN_MS = 180L;
+    private static final long MENU_ZOOM_CLOSE_MS = 145L;
+    private static final float MENU_CONTENT_REVEAL = 0.74f;
     private static final long COUNT_CACHE_MS = 250L;
+    private boolean suppressBottomBar = false;
 
-    private static final int TAB_LIST = 0;
-    private static final int TAB_ADD  = 1;
+    private static final int TAB_LIST   = 0;
+    private static final int TAB_ADD    = 1;
+    private static final int TAB_RECENT = 2;
 
     // ─── VIS ROW ─────────────────────────────────────────────────────────────
     private sealed interface VisRow permits VisRow.Header, VisRow.Node, VisRow.Empty {
@@ -42,8 +49,9 @@ public class GatherMenuScreen extends Screen {
 
     // ─── STATE ───────────────────────────────────────────────────────────────
     private int activeTab  = TAB_LIST;
-    private int listScroll = 0;
-    private int baseScroll = 0;
+    private int listScroll   = 0;
+    private int baseScroll   = 0;
+    private int recentScroll = 0;
 
     // Editing
     private int editingList  = -1;
@@ -64,6 +72,7 @@ public class GatherMenuScreen extends Screen {
     private String           addFocusedItemId = null;
     private int              addScroll        = 0;
     private int              addModeToggleX, addModeToggleY; // set during renderAddTab
+    private int              favoriteStarX, favoriteStarY, favoriteStarSize;
     private int              newListBtnX,    newListBtnY;    // set during renderListTab
     private int              chestModeBtnX,  chestModeBtnY, chestModeBtnW; // set during renderListTab
     private int              clearChestsBtnX, clearChestsBtnY, clearChestsBtnW; // set during renderListTab
@@ -72,6 +81,8 @@ public class GatherMenuScreen extends Screen {
     private int              outlinesBtnX,   outlinesBtnY,   outlinesBtnW;      // set during renderListTab
     private int              finderBtnX,     finderBtnY,     finderBtnW;        // set during renderListTab
     private boolean          finderBtnEnabled;
+    private int              rescanBtnX,     rescanBtnY,     rescanBtnW;        // set during renderListTab
+    private int              rescanFeedbackTicks = 0;
     private int              enableGatherBtnX, enableGatherBtnY, enableGatherBtnW, enableGatherBtnH;
 
     // Pending add (multi-list picker)
@@ -84,7 +95,7 @@ public class GatherMenuScreen extends Screen {
     private int     potentialDragNode = -1;
     private boolean isDragging        = false;
     private int     dragGhostX, dragGhostY;
-    private final long openedAtMs = System.currentTimeMillis();
+    private long openedAtMs;
     private boolean closing = false;
     private long closingAtMs = 0L;
     private long countCacheExpiresAtMs = 0L;
@@ -93,7 +104,30 @@ public class GatherMenuScreen extends Screen {
 
     // ─── INIT ────────────────────────────────────────────────────────────────
 
-    public GatherMenuScreen() { super(Text.literal("Gather")); }
+    public GatherMenuScreen() {
+        this(false);
+    }
+
+    private final boolean isTutorial;
+
+    GatherMenuScreen(boolean tutorial) {
+        super(Text.literal("Gather"));
+        this.isTutorial = tutorial;
+        this.openedAtMs = tutorial
+                ? System.currentTimeMillis() - 2000L
+                : System.currentTimeMillis();
+        if (!tutorial && GatherSettings.get().menuSpinAnimation) GatherUi.playMenuOpenSound();
+    }
+
+    void setTutorialTab(int tab) {
+        this.activeTab = tab;
+    }
+
+    void initForTutorial(int w, int h) {
+        this.width = w;
+        this.height = h;
+        this.init();
+    }
 
     @Override
     protected void init() {
@@ -107,11 +141,13 @@ public class GatherMenuScreen extends Screen {
 
         addAmountField = new TextFieldWidget(textRenderer, 0, 0, 52, 14, Text.literal(""));
         addAmountField.setMaxLength(7);
+        addAmountField.setTextPredicate(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
         addAmountField.setVisible(false);
         addSelectableChild(addAmountField);
 
         editField = new TextFieldWidget(textRenderer, 0, 0, 60, 14, Text.literal(""));
         editField.setMaxLength(7);
+        editField.setTextPredicate(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
         editField.setVisible(false);
         addSelectableChild(editField);
 
@@ -124,15 +160,24 @@ public class GatherMenuScreen extends Screen {
                 .filter(i -> !Registries.ITEM.getId(i).toString().equals("minecraft:air"))
                 .sorted(Comparator.comparing(i -> Registries.ITEM.getId(i).toString()))
                 .collect(Collectors.toList());
-        filteredItems = new ArrayList<>(allItems);
+        filterItems("");
     }
 
     private void filterItems(String q) {
-        if (q.isBlank()) { filteredItems = new ArrayList<>(allItems); return; }
         String lq = q.toLowerCase();
         filteredItems = allItems.stream()
-                .filter(i -> Registries.ITEM.getId(i).toString().contains(lq)
-                          || i.getName().getString().toLowerCase().contains(lq))
+                .filter(i -> q.isBlank()
+                        || Registries.ITEM.getId(i).toString().contains(lq)
+                        || i.getName().getString().toLowerCase().contains(lq))
+                .sorted((a, b) -> {
+                    GatherSettings settings = GatherSettings.get();
+                    String aid = Registries.ITEM.getId(a).toString();
+                    String bid = Registries.ITEM.getId(b).toString();
+                    boolean af = settings.isFavoriteItem(aid);
+                    boolean bf = settings.isFavoriteItem(bid);
+                    if (af != bf) return af ? -1 : 1;
+                    return aid.compareTo(bid);
+                })
                 .collect(Collectors.toList());
     }
 
@@ -141,7 +186,7 @@ public class GatherMenuScreen extends Screen {
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
         long now = System.currentTimeMillis();
-        if (closing && now - closingAtMs >= MENU_ANIM_MS) {
+        if (closing && now - closingAtMs >= menuAnimationDurationMs()) {
             if (client != null) client.setScreen(null);
             return;
         }
@@ -151,12 +196,33 @@ public class GatherMenuScreen extends Screen {
 
         var matrices = ctx.getMatrices();
         matrices.pushMatrix();
-        float scale = closing ? 0.3f + 0.7f * anim : 0.88f + 0.12f * easeOutBack(anim);
+        float eased = easeOutCubic(anim);
+        float scale = menuScale(now, anim, eased);
         matrices.translate(width / 2.0f, height / 2.0f);
+        if (GatherSettings.get().menuSpinAnimation) {
+            float spin = (1.0f - eased) * -720.0f;
+            matrices.rotate((float) Math.toRadians(spin));
+        }
         matrices.scale(scale, scale);
         matrices.translate(-width / 2.0f, -height / 2.0f);
+        boolean full = shouldRenderFullContent(anim);
+        suppressBottomBar = !full && GatherSettings.get().menuSpinAnimation;
         renderContents(ctx, mx, my, delta);
+        suppressBottomBar = false;
         matrices.popMatrix();
+    }
+
+    private boolean shouldRenderFullContent(float anim) {
+        return !GatherSettings.get().menuSpinAnimation || anim >= MENU_CONTENT_REVEAL;
+    }
+
+    private boolean menuAnimationBlockingInput() {
+        if (!GatherSettings.get().menuSpinAnimation) return false;
+        return !shouldRenderFullContent(animationProgress(System.currentTimeMillis()));
+    }
+
+    private static int argb(int alpha, int rgb) {
+        return (Math.max(0, Math.min(255, alpha)) << 24) | (rgb & 0x00FFFFFF);
     }
 
     private void renderContents(DrawContext ctx, int mx, int my, float delta) {
@@ -172,10 +238,14 @@ public class GatherMenuScreen extends Screen {
         int ly = PAD + 22 + 4;
         addSearch.setVisible(activeTab == TAB_ADD);
 
-        if (activeTab == TAB_LIST) renderListTab(ctx, mx, my, lx, ly);
-        else                       renderAddTab(ctx, mx, my, lx, ly);
+        if      (activeTab == TAB_LIST)   renderListTab(ctx, mx, my, lx, ly);
+        else if (activeTab == TAB_RECENT) renderRecentTab(ctx, mx, my, lx, ly);
+        else                              renderAddTab(ctx, mx, my, lx, ly);
 
-        drawBottomBar(ctx, mx, my);
+        // Always show the mode toggle panel in tutorial, so right side is never empty
+        if (isTutorial && activeTab != TAB_ADD) renderModeTogglePanel(ctx, mx, my);
+
+        if (!suppressBottomBar) drawBottomBar(ctx, mx, my);
         super.render(ctx, mx, my, delta);
 
         // Drag ghost
@@ -200,12 +270,44 @@ public class GatherMenuScreen extends Screen {
 
     private float animationProgress(long now) {
         long start = closing ? closingAtMs : openedAtMs;
-        float t = Math.max(0f, Math.min(1f, (now - start) / (float) MENU_ANIM_MS));
+        float t = Math.max(0f, Math.min(1f, (now - start) / (float) menuAnimationDurationMs()));
         return closing ? 1f - easeOutCubic(t) : t;
+    }
+
+    private long menuAnimationDurationMs() {
+        if (GatherSettings.get().menuSpinAnimation) return MENU_ANIM_MS;
+        return closing ? MENU_ZOOM_CLOSE_MS : MENU_ZOOM_OPEN_MS;
+    }
+
+    private float rawAnimationProgress(long now) {
+        long start = closing ? closingAtMs : openedAtMs;
+        return Math.max(0f, Math.min(1f, (now - start) / (float) menuAnimationDurationMs()));
+    }
+
+    private float menuScale(long now, float anim, float eased) {
+        if (GatherSettings.get().menuSpinAnimation) {
+            return 0.015f + 0.985f * eased;
+        }
+
+        float t = rawAnimationProgress(now);
+        if (closing) {
+            float out = easeOutCubic(t);
+            return 1.0f - 0.92f * out;
+        }
+
+        float pop = easeOutBackLight(t);
+        return 0.46f + 0.54f * pop;
     }
 
     private static float easeOutBack(float t) {
         float c1 = 1.70158f;
+        float c3 = c1 + 1.0f;
+        float p = t - 1.0f;
+        return 1.0f + c3 * p * p * p + c1 * p * p;
+    }
+
+    private static float easeOutBackLight(float t) {
+        float c1 = 0.82f;
         float c3 = c1 + 1.0f;
         float p = t - 1.0f;
         return 1.0f + c3 * p * p * p + c1 * p * p;
@@ -240,14 +342,19 @@ public class GatherMenuScreen extends Screen {
     }
 
     private void drawTabs(DrawContext ctx, int mx, int my) {
-        int tabW = 100, tabH = 20, ty = PAD, cx = width / 2;
-        int lx2 = cx - tabW - 2, rx = cx + 2;
-        boolean lh = mx>=lx2 && mx<=lx2+tabW && my>=ty && my<=ty+tabH;
-        boolean rh = mx>=rx  && mx<=rx+tabW  && my>=ty && my<=ty+tabH;
-        ctx.fill(lx2, ty, lx2+tabW, ty+tabH, activeTab==TAB_LIST ? 0xFF334466 : (lh?0xFF223355:0xFF1A2233));
-        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("< My Lists"),  lx2+tabW/2, ty+6, 0xFFCCDDFF);
-        ctx.fill(rx,  ty, rx+tabW,  ty+tabH, activeTab==TAB_ADD  ? 0xFF334466 : (rh?0xFF223355:0xFF1A2233));
-        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("Add Items >"), rx+tabW/2,  ty+6, 0xFFCCDDFF);
+        int tabW = 90, tabH = 20, ty = PAD, gap = 2, cx = width / 2;
+        // 3 tabs centered: total = 3*tabW + 2*gap, start = cx - half
+        int t0x = cx - tabW - gap - tabW / 2;
+        int t1x = cx - tabW / 2;
+        int t2x = cx + tabW / 2 + gap;
+        for (int t = 0; t < 3; t++) {
+            int tx = t == 0 ? t0x : t == 1 ? t1x : t2x;
+            boolean hov = mx>=tx && mx<=tx+tabW && my>=ty && my<=ty+tabH;
+            boolean active = activeTab == t;
+            ctx.fill(tx, ty, tx+tabW, ty+tabH, active ? 0xFF334466 : (hov ? 0xFF223355 : 0xFF1A2233));
+            String label = t == 0 ? "My Lists" : t == 1 ? "Add Items" : "Recent";
+            ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(label), tx+tabW/2, ty+6, 0xFFCCDDFF);
+        }
     }
 
     // ─── LIST TAB ────────────────────────────────────────────────────────────
@@ -256,6 +363,9 @@ public class GatherMenuScreen extends Screen {
         GatherState state = GatherState.get();
 
         // === LEFT PANEL ===
+        if (suppressBottomBar) {
+            clearSideControlHitboxes();
+        } else {
         int leftCx = lx / 2;
         int panelTop = ly;
         int panelBot = height - BOTTOM_H;
@@ -316,6 +426,21 @@ public class GatherMenuScreen extends Screen {
                 clearChestsBtnW = 0;
             }
 
+            // Rescan button
+            if (rescanFeedbackTicks > 0) rescanFeedbackTicks--;
+            String rescanLabel = rescanFeedbackTicks > 0 ? "Rescanning..." : "Rescan Now";
+            rescanBtnW = textRenderer.getWidth(rescanLabel) + 8;
+            rescanBtnX = leftCx - rescanBtnW / 2;
+            rescanBtnY = scanY;
+            boolean rsHov = rescanFeedbackTicks == 0 && mx >= rescanBtnX && mx <= rescanBtnX + rescanBtnW
+                         && my >= rescanBtnY && my <= rescanBtnY + 10;
+            ctx.fill(rescanBtnX, rescanBtnY, rescanBtnX + rescanBtnW, rescanBtnY + 10,
+                    rescanFeedbackTicks > 0 ? 0x66112233 : (rsHov ? 0xAA003366 : 0x66001133));
+            ctx.drawTextWithShadow(textRenderer, Text.literal(rescanLabel),
+                    rescanBtnX + 4, rescanBtnY + 1,
+                    rescanFeedbackTicks > 0 ? 0xFF446688 : (rsHov ? 0xFF44AAFF : 0xFF2266AA));
+            scanY += 13;
+
             int unloadedTracked = client != null && client.world != null
                     ? gstate.getUnloadedTrackedChestCount(client.world) : 0;
             ctx.drawTextWithShadow(textRenderer, Text.literal("Scans nearby loaded chests."),
@@ -342,6 +467,7 @@ public class GatherMenuScreen extends Screen {
             chestModeBtnW = 0;
         } else {
             clearChestsBtnW = 0;
+            rescanBtnW = 0;
             ctx.drawTextWithShadow(textRenderer, Text.literal("Only inventory counts now."),
                     leftCx - textRenderer.getWidth("Only inventory counts now.") / 2, scanY, 0xFF445566);
             scanY += 18;
@@ -466,6 +592,7 @@ public class GatherMenuScreen extends Screen {
             ctx.drawTextWithShadow(textRenderer, Text.literal(btnLabel),
                     leftCx - textRenderer.getWidth(btnLabel) / 2, newListBtnY + 6, 0xFFCCDDFF);
         }
+        }
 
         int summaryY = height - BOTTOM_H - SUMMARY_H - 4;
         int visCount = (summaryY - ly) / ENTRY_H;
@@ -521,6 +648,18 @@ public class GatherMenuScreen extends Screen {
         }
     }
 
+    private void clearSideControlHitboxes() {
+        newListBtnX = newListBtnY = -1000;
+        chestModeBtnW = 0;
+        clearChestsBtnW = 0;
+        clearManualBtnW = 0;
+        autoTrackBtnW = 0;
+        outlinesBtnW = 0;
+        finderBtnW = 0;
+        rescanBtnW = 0;
+        finderBtnEnabled = false;
+    }
+
     private void renderHeaderRow(DrawContext ctx, int mx, int my, int lx, int y, int listIndex) {
         GatherState state = GatherState.get();
         GatherList list = state.getList(listIndex);
@@ -532,7 +671,8 @@ public class GatherMenuScreen extends Screen {
         if (renamingList == listIndex) {
             renameField.setX(lx + 4); renameField.setY(y + 6); renameField.setWidth(160);
         } else {
-            ctx.drawTextWithShadow(textRenderer, Text.literal("§b" + list.name), lx+6, y+10, 0xFFCCEEFF);
+            String nameLabel = list.hudHidden ? "§8" + list.name : "§b" + list.name;
+            ctx.drawTextWithShadow(textRenderer, Text.literal(nameLabel), lx+6, y+10, 0xFFCCEEFF);
         }
 
         int bx = lx + LIST_W - 2;
@@ -545,6 +685,14 @@ public class GatherMenuScreen extends Screen {
                     hov && mx>=delX && mx<=bx && my>=btnY && my<=btnY+14);
         drawButton(ctx, renX, btnY, renW, 14, renamingList==listIndex ? "Done" : "Rename", mx, my,
                 hov && mx>=renX && mx<=renX+renW && my>=btnY && my<=btnY+14);
+
+        // Tooltip: right-click to toggle HUD visibility
+        boolean overButtons = mx>=renX && mx<=bx;
+        if (hov && !overButtons) {
+            String tip = list.hudHidden ? "Right-click to show in HUD" : "Right-click to hide from HUD";
+            hoveredTooltipLines = List.of(Text.literal(tip));
+            tooltipX = mx; tooltipY = my;
+        }
     }
 
     private void renderNodeRow(DrawContext ctx, int mx, int my, int lx, int y,
@@ -725,24 +873,67 @@ public class GatherMenuScreen extends Screen {
     private static final int TOGGLE_W = 84;
     private static final int TOGGLE_H = 20;
 
-    private void renderAddTab(DrawContext ctx, int mx, int my, int lx, int ly) {
-        GatherState state = GatherState.get();
-        ctx.drawTextWithShadow(textRenderer,
-                Text.literal("Click item · type amount · press ↵ to add"),
-                lx, ly+2, 0xFF445566);
+    // ─── RECENT TAB ──────────────────────────────────────────────────────────
 
-        // === MODE TOGGLE — right side panel, vertically centred ===
+    private void renderRecentTab(DrawContext ctx, int mx, int my, int lx, int ly) {
+        List<GatherSettings.RecentEntry> recent = GatherSettings.get().getRecentItems();
+        if (recent.isEmpty()) {
+            ctx.drawCenteredTextWithShadow(textRenderer,
+                    Text.literal("No recent items yet."), width/2, ly + 20, 0xFF556677);
+            return;
+        }
+        int contentBot = height - BOTTOM_H - 4;
+        int visCount   = (contentBot - ly) / ENTRY_H;
+        int maxScroll  = Math.max(0, recent.size() - visCount);
+        recentScroll   = Math.max(0, Math.min(recentScroll, maxScroll));
+
+        for (int i = 0; i < visCount && (i + recentScroll) < recent.size(); i++) {
+            GatherSettings.RecentEntry entry = recent.get(i + recentScroll);
+            int y = ly + i * ENTRY_H;
+            boolean hov = mx >= lx && mx <= lx+LIST_W && my >= y && my <= y+ENTRY_H-2;
+            ctx.fill(lx, y, lx+LIST_W, y+ENTRY_H-2, hov ? 0xAA334466 : 0xAA1A2A44);
+            ctx.fill(lx, y+ENTRY_H-2, lx+LIST_W, y+ENTRY_H-1, 0xFF334466);
+
+            Item item = Registries.ITEM.get(Identifier.of(entry.itemId));
+            if (item != null) ctx.drawItem(item.getDefaultStack(), lx+4, y+(ENTRY_H-2-16)/2);
+            String name = item != null ? item.getName().getString() : entry.itemId;
+            ctx.drawTextWithShadow(textRenderer, Text.literal(name), lx+24, y+5, 0xFFCCDDFF);
+            ctx.drawTextWithShadow(textRenderer, Text.literal("×" + entry.count + "  click to re-add"), lx+24, y+15, 0xFF445566);
+        }
+    }
+
+    private boolean handleRecentClick(int mx, int my, int lx, int ly) {
+        List<GatherSettings.RecentEntry> recent = GatherSettings.get().getRecentItems();
+        int contentBot = height - BOTTOM_H - 4;
+        int visCount   = (contentBot - ly) / ENTRY_H;
+        for (int i = 0; i < visCount && (i + recentScroll) < recent.size(); i++) {
+            int y = ly + i * ENTRY_H;
+            if (my >= y && my <= y+ENTRY_H-2 && mx >= lx && mx <= lx+LIST_W) {
+                GatherSettings.RecentEntry entry = recent.get(i + recentScroll);
+                GatherUi.playClickSound();
+                pendingAddItemId = entry.itemId;
+                pendingAddCount  = entry.count;
+                pendingPickerSelected = -1;
+                if (GatherState.get().getListCount() == 1) executeAdd(0);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ─── ADD TAB ─────────────────────────────────────────────────────────────
+
+    private void renderModeTogglePanel(DrawContext ctx, int mx, int my) {
+        int lx = width / 2 - LIST_W / 2;
         boolean modeTotal = GatherSettings.get().countExistingOnAdd;
-        int rightPanelCx  = (lx + LIST_W + width) / 2;
-        addModeToggleX    = rightPanelCx - TOGGLE_W / 2;
-        addModeToggleY    = height / 2 - TOGGLE_H / 2;
+        int rightPanelCx = (lx + LIST_W + width) / 2;
+        addModeToggleX   = rightPanelCx - TOGGLE_W / 2;
+        addModeToggleY   = height / 2 - TOGGLE_H / 2;
 
-        // Label above
         String topLabel = "Add goal as:";
         ctx.drawTextWithShadow(textRenderer, Text.literal(topLabel),
                 rightPanelCx - textRenderer.getWidth(topLabel) / 2, addModeToggleY - 14, 0xFF8899AA);
 
-        // Button
         boolean tHov = mx >= addModeToggleX && mx <= addModeToggleX + TOGGLE_W
                     && my >= addModeToggleY && my <= addModeToggleY + TOGGLE_H;
         int btnBg = tHov ? 0xCC3355AA : (modeTotal ? 0xCC224477 : 0xCC223355);
@@ -755,14 +946,22 @@ public class GatherMenuScreen extends Screen {
         ctx.drawTextWithShadow(textRenderer, Text.literal(modeLabel),
                 rightPanelCx - mlW / 2, addModeToggleY + 6, 0xFFCCDDFF);
 
-        // Description below (2 lines)
         String desc1 = modeTotal ? "Set a total target count." : "Add N more items to gather.";
         String desc2 = modeTotal ? "Existing items count toward it." : "Ignores what you already have.";
         int descY = addModeToggleY + TOGGLE_H + 8;
         ctx.drawTextWithShadow(textRenderer, Text.literal(desc1),
-                rightPanelCx - textRenderer.getWidth(desc1) / 2, descY,     0xFF556677);
+                rightPanelCx - textRenderer.getWidth(desc1) / 2, descY,      0xFF556677);
         ctx.drawTextWithShadow(textRenderer, Text.literal(desc2),
                 rightPanelCx - textRenderer.getWidth(desc2) / 2, descY + 12, 0xFF556677);
+    }
+
+    private void renderAddTab(DrawContext ctx, int mx, int my, int lx, int ly) {
+        GatherState state = GatherState.get();
+        ctx.drawTextWithShadow(textRenderer,
+                Text.literal("Click item · type amount · press ↵ to add"),
+                lx, ly+2, 0xFF445566);
+
+        renderModeTogglePanel(ctx, mx, my);
 
         int searchY  = ly+12;
         addSearch.setX(lx); addSearch.setY(searchY);
@@ -771,6 +970,9 @@ public class GatherMenuScreen extends Screen {
         int itemsTop = searchY+20;
         int visCount = (height-itemsTop-BOTTOM_H-4)/ENTRY_H;
         int fieldW   = 52, fieldX = lx+LIST_W-2-fieldW;
+        favoriteStarSize = 12;
+        favoriteStarX = fieldX - favoriteStarSize - 5;
+        favoriteStarY = -1000;
 
         for (int i = 0; i < visCount && (i+addScroll) < filteredItems.size(); i++) {
             Item   item = filteredItems.get(i+addScroll);
@@ -789,9 +991,18 @@ public class GatherMenuScreen extends Screen {
                         fieldX-4-textRenderer.getWidth(cs), y+10, 0xFF66FF88);
             }
 
+            int rowStarY = y + 7;
+            boolean fav = GatherSettings.get().isFavoriteItem(id);
+            boolean starHov = mx >= favoriteStarX && mx <= favoriteStarX + favoriteStarSize
+                    && my >= rowStarY && my <= rowStarY + favoriteStarSize;
+            ctx.drawTextWithShadow(textRenderer, Text.literal(fav ? "★" : "☆"),
+                    favoriteStarX + 1, rowStarY + 1,
+                    fav ? 0xFFFFDD55 : (starHov ? 0xFFFFEE88 : 0xFF667788));
+
             if (id.equals(addFocusedItemId)) {
                 addAmountField.setX(fieldX); addAmountField.setY(y+7);
                 addAmountField.setWidth(fieldW); addAmountField.setVisible(true);
+                favoriteStarY = y + 7;
                 ctx.drawTextWithShadow(textRenderer, Text.literal("↵"), fieldX+fieldW+3, y+10, 0xFF556644);
                 if (GatherSettings.get().countExistingOnAdd) {
                     int have = countForId(id);
@@ -906,6 +1117,7 @@ public class GatherMenuScreen extends Screen {
 
     @Override
     public boolean mouseClicked(Click click, boolean focused) {
+        if (menuAnimationBlockingInput()) return true;
         int mx = (int)click.x(), my = (int)click.y();
         int btn = click.button();
 
@@ -948,10 +1160,12 @@ public class GatherMenuScreen extends Screen {
             return true; // absorb all clicks while picker is open
         }
 
-        int tabW = 100, tabH = 20, ty = PAD, cx = width/2;
+        int tabW = 90, tabH = 20, ty = PAD, gap = 2, cx = width/2;
+        int t0x = cx - tabW - gap - tabW/2, t1x = cx - tabW/2, t2x = cx + tabW/2 + gap;
         if (my>=ty && my<=ty+tabH) {
-            if (mx>=cx-tabW-2 && mx<=cx-2) { GatherUi.playClickSound(); switchTab(TAB_LIST); return true; }
-            if (mx>=cx+2 && mx<=cx+tabW+2) { GatherUi.playClickSound(); switchTab(TAB_ADD);  return true; }
+            if (mx>=t0x && mx<=t0x+tabW) { GatherUi.playClickSound(); switchTab(TAB_LIST);   return true; }
+            if (mx>=t1x && mx<=t1x+tabW) { GatherUi.playClickSound(); switchTab(TAB_ADD);    return true; }
+            if (mx>=t2x && mx<=t2x+tabW) { GatherUi.playClickSound(); switchTab(TAB_RECENT); return true; }
         }
 
         if (super.mouseClicked(click, focused)) return true;
@@ -1001,6 +1215,24 @@ public class GatherMenuScreen extends Screen {
                 && mx >= clearChestsBtnX && mx <= clearChestsBtnX + clearChestsBtnW) {
             GatherUi.playClickSound();
             GatherState.get().clearTrackedChests();
+            return true;
+        }
+
+        // Rescan Now button
+        if (activeTab == TAB_LIST && rescanBtnW > 0 && rescanFeedbackTicks == 0
+                && my >= rescanBtnY && my <= rescanBtnY + 10
+                && mx >= rescanBtnX && mx <= rescanBtnX + rescanBtnW) {
+            GatherUi.playClickSound();
+            rescanFeedbackTicks = 50;
+            GatherState state = GatherState.get();
+            List<String> targets = state.getChestScanTargets(id -> {
+                Item item = Registries.ITEM.get(Identifier.of(id));
+                return item == null ? 0 : GatherHud.countInventoryTagAware(client, item);
+            });
+            GatherClientNetworking.requestAutoTrack(GatherSettings.get().chestScanRadius, targets);
+            Set<Long> all = new HashSet<>(state.getTrackedChests());
+            all.addAll(state.getManualChests());
+            if (!all.isEmpty()) GatherClientNetworking.requestTrackedChests(all);
             return true;
         }
 
@@ -1069,8 +1301,9 @@ public class GatherMenuScreen extends Screen {
             return true;
         }
 
-        if (activeTab == TAB_LIST) return handleListClick(mx, my, lx, PAD+22+4, btn);
-        else                       return handleAddClick(mx, my, lx, PAD+22+4);
+        if      (activeTab == TAB_LIST)   return handleListClick(mx, my, lx, PAD+22+4, btn);
+        else if (activeTab == TAB_RECENT) return handleRecentClick(mx, my, lx, PAD+22+4);
+        else                              return handleAddClick(mx, my, lx, PAD+22+4);
     }
 
     private boolean handleListClick(int mx, int my, int lx, int ly, int btn) {
@@ -1083,7 +1316,7 @@ public class GatherMenuScreen extends Screen {
             VisRow row = rows.get(i+listScroll);
             int y = ly+i*ENTRY_H;
             if (my < y || my > y+ENTRY_H-2 || mx < lx || mx > lx+LIST_W) continue;
-            if (row instanceof VisRow.Header h) return handleHeaderClick(mx, my, lx, y, h.listIndex());
+            if (row instanceof VisRow.Header h) return handleHeaderClick(mx, my, lx, y, h.listIndex(), btn);
             if (row instanceof VisRow.Node   n) return handleNodeClick(mx, my, lx, y, n.listIndex(), n.nodeIndex(), state, btn);
         }
         return false;
@@ -1114,10 +1347,11 @@ public class GatherMenuScreen extends Screen {
         return null;
     }
 
-    private boolean handleHeaderClick(int mx, int my, int lx, int y, int listIndex) {
+    private boolean handleHeaderClick(int mx, int my, int lx, int y, int listIndex, int btn) {
         GatherState state = GatherState.get();
         int bx = lx+LIST_W-2, delW = 36, renW = 44, gap = 3;
         int delX = bx-delW, renX = delX-gap-renW;
+        int btnY = y + (ENTRY_H - 2 - 14) / 2;
 
         if (state.getListCount() > 1 && mx>=delX && mx<=bx) {
             GatherUi.playClickSound();
@@ -1135,6 +1369,11 @@ public class GatherMenuScreen extends Screen {
                 renameField.setText(state.getList(listIndex).name);
                 renameField.setVisible(true); setFocused(renameField);
             }
+            return true;
+        }
+        if (btn == 1 && !(mx>=renX && mx<=bx)) {
+            GatherUi.playClickSound();
+            state.toggleListHudHidden(listIndex);
             return true;
         }
         return false;
@@ -1214,6 +1453,15 @@ public class GatherMenuScreen extends Screen {
             int  y    = itemsTop+i*ENTRY_H;
             if (my<y||my>y+ENTRY_H-2||mx<lx||mx>lx+LIST_W) continue;
             String id = Registries.ITEM.getId(item).toString();
+            int rowStarY = y + 7;
+            if (mx >= favoriteStarX && mx <= favoriteStarX + favoriteStarSize
+                    && my >= rowStarY && my <= rowStarY + favoriteStarSize) {
+                GatherUi.playClickSound();
+                GatherSettings.get().toggleFavoriteItem(id);
+                GatherSettings.get().save();
+                filterItems(addSearch.getText());
+                return true;
+            }
             if (!id.equals(addFocusedItemId)) {
                 GatherUi.playClickSound();
                 commitAddAmount();
@@ -1230,6 +1478,7 @@ public class GatherMenuScreen extends Screen {
 
     @Override
     public boolean mouseDragged(Click click, double deltaX, double deltaY) {
+        if (menuAnimationBlockingInput()) return true;
         if (click.button() == 0 && potentialDragList >= 0) {
             isDragging  = true;
             dragGhostX  = (int)click.x();
@@ -1241,6 +1490,7 @@ public class GatherMenuScreen extends Screen {
 
     @Override
     public boolean mouseReleased(Click click) {
+        if (menuAnimationBlockingInput()) return true;
         if (click.button() == 0) {
             if (isDragging && potentialDragList >= 0) {
                 int mx = (int)click.x(), my = (int)click.y();
@@ -1268,6 +1518,7 @@ public class GatherMenuScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double h, double v) {
+        if (menuAnimationBlockingInput()) return true;
         int ly = PAD+22+4;
         if (activeTab == TAB_LIST) {
             commitEdit();
@@ -1281,6 +1532,10 @@ public class GatherMenuScreen extends Screen {
             int visCount = (summaryY-ly)/ENTRY_H;
             int max = Math.max(0, buildVisibleRows(GatherState.get()).size()-visCount);
             listScroll = (int)Math.max(0, Math.min(max, listScroll-v));
+        } else if (activeTab == TAB_RECENT) {
+            int visCount = (height-ly-BOTTOM_H-4)/ENTRY_H;
+            int max = Math.max(0, GatherSettings.get().getRecentItems().size()-visCount);
+            recentScroll = (int)Math.max(0, Math.min(max, recentScroll-v));
         } else {
             addFocusedItemId = null; addAmountField.setVisible(false);
             int itemsTop = ly+12+20;
@@ -1303,6 +1558,10 @@ public class GatherMenuScreen extends Screen {
     @Override
     public boolean keyPressed(KeyInput input) {
         int key = input.key();
+
+        if (isGatherMenuKey(input) || key==GLFW.GLFW_KEY_E) {
+            commitEdit(); commitAddAmount(); commitRename(); close(); return true;
+        }
 
         // Picker key handling — takes full priority
         if (pendingAddItemId != null) {
@@ -1331,9 +1590,6 @@ public class GatherMenuScreen extends Screen {
         boolean searchFocused = addSearch   != null && addSearch.isActive()   && getFocused() == addSearch;
         boolean renameFocused = renameField != null && renameField.isActive() && getFocused() == renameField;
 
-        if (!searchFocused && !renameFocused && (key==GLFW.GLFW_KEY_G || key==GLFW.GLFW_KEY_E)) {
-            commitEdit(); commitAddAmount(); commitRename(); close(); return true;
-        }
         if (!searchFocused && !renameFocused && key==GLFW.GLFW_KEY_LEFT)  { switchTab(TAB_LIST); return true; }
         if (!searchFocused && !renameFocused && key==GLFW.GLFW_KEY_RIGHT) { switchTab(TAB_ADD);  return true; }
 
@@ -1346,6 +1602,11 @@ public class GatherMenuScreen extends Screen {
         if (addFocusedItemId!=null && (key==GLFW.GLFW_KEY_ENTER||key==GLFW.GLFW_KEY_KP_ENTER)) { commitAddAmount(); return true; }
         if (addFocusedItemId!=null && key==GLFW.GLFW_KEY_ESCAPE) { addFocusedItemId=null; addAmountField.setVisible(false); return true; }
         return super.keyPressed(input);
+    }
+
+    private boolean isGatherMenuKey(KeyInput input) {
+        InputUtil.Key gatherKey = KeyBindingHelper.getBoundKeyOf(GatherKeyBindings.openMenu);
+        return gatherKey.getCode() == input.key();
     }
 
     // ─── HELPERS ─────────────────────────────────────────────────────────────
@@ -1381,7 +1642,7 @@ public class GatherMenuScreen extends Screen {
         addFocusedItemId=null; addAmountField.setText(""); addAmountField.setVisible(false);
 
         if (n <= 0) return;
-        int count = Math.min(n, 999999);
+        int count = Math.min(n, 9999999);
 
         pendingAddItemId     = itemId;
         pendingAddCount      = count;
@@ -1398,6 +1659,8 @@ public class GatherMenuScreen extends Screen {
         invalidateCountCaches();
         GatherState.get().addItem(listIndex, pendingAddItemId, pendingAddCount, baseline);
         refreshRootBreakdown(listIndex, pendingAddItemId);
+        GatherSettings.get().addRecentItem(pendingAddItemId, pendingAddCount);
+        GatherSettings.get().save();
         pendingAddItemId = null; pendingAddCount = 0;
     }
 
@@ -1406,8 +1669,10 @@ public class GatherMenuScreen extends Screen {
         if (tab == TAB_ADD) {
             activeTab=TAB_ADD; addSearch.setVisible(true);
             addFocusedItemId=null; addAmountField.setVisible(false); setFocused(addSearch);
+        } else if (tab == TAB_RECENT) {
+            commitAddAmount(); addSearch.setVisible(false); activeTab=TAB_RECENT; setFocused(null);
         } else {
-            commitAddAmount(); activeTab=TAB_LIST; setFocused(null);
+            commitAddAmount(); addSearch.setVisible(false); activeTab=TAB_LIST; setFocused(null);
         }
     }
 
@@ -1670,6 +1935,7 @@ public class GatherMenuScreen extends Screen {
         if (closing) return;
         closing = true;
         closingAtMs = System.currentTimeMillis();
+        if (GatherSettings.get().menuSpinAnimation) GatherUi.playMenuCloseSound();
     }
 
     @Override

@@ -261,11 +261,19 @@ public class GatherChestFinderScreen extends Screen {
 
         // Empty state
         if (shown.isEmpty()) {
-            ctx.drawCenteredTextWithShadow(textRenderer,
-                    Text.literal(allEntries.isEmpty()
-                            ? "No items in scanned chests."
-                            : "No matches."),
-                    cx, (listTop() + listBottom()) / 2 - 4, 0xFF556677);
+            int emptyMidY = (listTop() + listBottom()) / 2;
+            if (allEntries.isEmpty()) {
+                ctx.drawCenteredTextWithShadow(textRenderer,
+                        Text.literal("No items in scanned chests."),
+                        cx, emptyMidY - 9, 0xFF556677);
+                ctx.drawCenteredTextWithShadow(textRenderer,
+                        Text.literal("Open chests or press Shift+G to tag them."),
+                        cx, emptyMidY + 3, 0xFF3A4A58);
+            } else {
+                ctx.drawCenteredTextWithShadow(textRenderer,
+                        Text.literal("No matches."),
+                        cx, emptyMidY - 4, 0xFF556677);
+            }
         }
 
         // Scrollbar

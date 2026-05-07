@@ -28,6 +28,7 @@ import net.minecraft.registry.Registries;
 import net.minecraft.screen.ShulkerBoxScreenHandler;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
+import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.collection.DefaultedList;
 import net.minecraft.util.math.BlockPos;
@@ -43,12 +44,12 @@ import java.util.Set;
 
 public class GatherShulkerCollectorOverlay {
 
+    private static final Identifier SEARCH_ICON_TEX = Identifier.of("gather", "textures/gui/search_icon.png");
     private static final int BUTTON_W = 100;
     private static final int BUTTON_H = 14;
     private static final int PANEL_W = 178;
     private static final int PANEL_H = 92;
     private static final int ROW_H = 12;
-
     private static boolean collectorActive = false;
     private static boolean allMode = true;
     private static boolean leaveOne = true;
@@ -62,6 +63,10 @@ public class GatherShulkerCollectorOverlay {
     private static List<Text> hoveredLines = null;
     private static int tooltipX, tooltipY;
     private static List<String> allItemsCache = null;
+    private static final Map<String, String> LABEL_CACHE = new HashMap<>();
+    private static List<String> filteredCache = List.of();
+    private static boolean filteredDirty = true;
+    private static long filteredMs = 0;
 
     public static void register() {
         ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
@@ -70,13 +75,14 @@ public class GatherShulkerCollectorOverlay {
             if (!(handled.getScreenHandler() instanceof ShulkerBoxScreenHandler)) return;
             syncOpenShulkerState(client, handled);
             GatherClientNetworking.requestCollectorState();
-            certainOpen = !allMode; // reopen panel if already in certain mode
+            certainOpen = false;
             filterGoalsOnly = true;
             scroll = 0;
+            filteredDirty = true;
             searchField = new TextFieldWidget(client.textRenderer, 0, 0, PANEL_W - 12, 16, Text.literal("Search"));
             searchField.setMaxLength(32);
             searchField.setPlaceholder(Text.literal("Search needed items"));
-            searchField.setChangedListener(value -> scroll = 0);
+            searchField.setChangedListener(value -> { scroll = 0; filteredDirty = true; });
             searchField.setVisible(false);
             Screens.getButtons(screen).add(searchField);
 
@@ -116,6 +122,15 @@ public class GatherShulkerCollectorOverlay {
                 if (!certainOpen) return true;
                 if (searchField != null && searchField.isFocused()) return true;
                 return handleKeyPress(input);
+            });
+
+            Inventory initInv = ((ShulkerBoxScreenHandlerAccessor) handled.getScreenHandler()).gather$getInventory();
+            final long closePlacedPos = initInv instanceof ShulkerBoxBlockEntity initShulker
+                    ? initShulker.getPos().asLong()
+                    : -1L;
+            ScreenEvents.remove(screen).register(s -> {
+                WorldHighlightRenderer.resetCollectorLabelCache();
+                if (closePlacedPos != -1L) GatherClientNetworking.requestTrackedChests(java.util.Set.of(closePlacedPos));
             });
         });
     }
@@ -168,7 +183,7 @@ public class GatherShulkerCollectorOverlay {
         int edge = certainOpen ? 0xFF33DDAA : 0xFF445566;
         ctx.fill(b[0], b[1], b[0] + 16, b[1] + BUTTON_H, bg);
         ctx.fill(b[0], b[1], b[0] + 16, b[1] + 1, edge);
-        drawSearchIcon(ctx, b[0] + 4, b[1] + 3, certainOpen ? 0xFF66FFD6 : 0xFFE6EFF7);
+        drawSearchIcon(ctx, b[0] + 2, b[1] + 2);
         if (hovered) {
             ctx.setCursor(StandardCursors.POINTING_HAND);
             hoveredLines = List.of(Text.literal(certainOpen ? "Collapse item picker" : "Open item picker"));
@@ -291,6 +306,7 @@ public class GatherShulkerCollectorOverlay {
         if (inside(mx, my, toggleX, toggleY, 48, 14)) {
             filterGoalsOnly = !filterGoalsOnly;
             scroll = 0;
+            filteredDirty = true;
             if (searchField != null) {
                 searchField.setPlaceholder(Text.literal(filterGoalsOnly ? "Search goals..." : "Search all items..."));
             }
@@ -325,6 +341,16 @@ public class GatherShulkerCollectorOverlay {
     }
 
     private static List<String> filteredNeededItems() {
+        long now = System.currentTimeMillis();
+        if (filteredDirty || now - filteredMs > 1000) {
+            filteredCache = buildFilteredNeededItems();
+            filteredDirty = false;
+            filteredMs = now;
+        }
+        return filteredCache;
+    }
+
+    private static List<String> buildFilteredNeededItems() {
         String q = searchField == null ? "" : searchField.getText().trim().toLowerCase(Locale.ROOT);
         List<String> source = filterGoalsOnly ? currentNeededItems() : getAllItems();
         List<String> result = new ArrayList<>();
@@ -354,9 +380,10 @@ public class GatherShulkerCollectorOverlay {
     }
 
     private static String itemLabel(String id) {
-        Item item = Registries.ITEM.get(Identifier.of(id));
-        if (item == null) return id;
-        return item.getName().getString();
+        return LABEL_CACHE.computeIfAbsent(id, k -> {
+            Item item = Registries.ITEM.get(Identifier.of(k));
+            return item != null ? item.getName().getString() : k;
+        });
     }
 
     private static void sendConfig() {
@@ -382,13 +409,8 @@ public class GatherShulkerCollectorOverlay {
         return new int[]{mode[0] - 18, mode[1]};
     }
 
-    private static void drawSearchIcon(DrawContext ctx, int x, int y, int color) {
-        ctx.fill(x, y, x + 7, y + 1, color);
-        ctx.fill(x, y + 6, x + 7, y + 7, color);
-        ctx.fill(x, y, x + 1, y + 7, color);
-        ctx.fill(x + 6, y, x + 7, y + 7, color);
-        ctx.fill(x + 6, y + 6, x + 8, y + 8, color);
-        ctx.fill(x + 8, y + 8, x + 10, y + 10, color);
+    private static void drawSearchIcon(DrawContext ctx, int x, int y) {
+        ctx.drawTexture(RenderPipelines.GUI_TEXTURED, SEARCH_ICON_TEX, x, y, 0.0f, 0.0f, 13, 13, 13, 13);
     }
 
     private static int[] panelBounds(HandledScreen<?> screen) {
@@ -449,14 +471,25 @@ public class GatherShulkerCollectorOverlay {
         leaveOne = payload.leaveOne();
         selectedItems.clear();
         selectedItems.addAll(payload.selectedItemIds());
-        certainOpen = !allMode;
+        if (allMode) certainOpen = false;
         scroll = 0;
         serverStateLoaded = true;
+        WorldHighlightRenderer.resetCollectorLabelCache();
         cacheOpenPlacedShulkerState();
+        refreshOpenPlacedShulkerContents();
         if (searchField != null) {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.currentScreen instanceof HandledScreen<?> screen) syncSearchField(screen);
         }
+    }
+
+    private static void refreshOpenPlacedShulkerContents() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (!(client.currentScreen instanceof HandledScreen<?> screen)) return;
+        if (!(screen.getScreenHandler() instanceof ShulkerBoxScreenHandler handler)) return;
+        Inventory inventory = ((ShulkerBoxScreenHandlerAccessor) handler).gather$getInventory();
+        if (!(inventory instanceof ShulkerBoxBlockEntity shulker)) return;
+        GatherClientNetworking.requestTrackedChests(java.util.Set.of(shulker.getPos().asLong()));
     }
 
     private static void cacheOpenPlacedShulkerState() {

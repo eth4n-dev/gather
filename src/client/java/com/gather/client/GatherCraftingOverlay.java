@@ -1,6 +1,5 @@
 package com.gather.client;
 
-import com.gather.GatherMod;
 import com.gather.client.mixin.HandledScreenAccessor;
 import com.gather.network.AutoCraftPayload;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
@@ -9,8 +8,12 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.cursor.StandardCursors;
 import net.minecraft.client.gui.screen.ingame.CraftingScreen;
+import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.client.sound.PositionedSoundInstance;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.TagKey;
 import net.minecraft.sound.SoundEvents;
@@ -18,6 +21,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,9 +39,11 @@ public class GatherCraftingOverlay {
     private static final int ROW_H = 28;
     private static final int BUTTON_SIZE = 16;
     private static final int CLOSE_SIZE = 9;
-    private static final Identifier DARK_MODE_MARKER = Identifier.of(GatherMod.MOD_ID, "dark_mode_enabled.txt");
 
-    private record CraftEntry(String itemId, List<Integer> indices) {}
+    private record CraftEntry(String itemId, ItemStack stack, List<Integer> indices) {}
+    private static final Map<String, Item> ITEM_ID_CACHE = new HashMap<>();
+    private static final Map<Item, Set<TagKey<Item>>> ITEM_TAG_CACHE = new HashMap<>();
+    private static long lastCraftCacheMs = 0;
     private static List<CraftEntry> craftCache = List.of();
     private static int panelScroll = 0;
     private static boolean panelOpen = false;
@@ -51,13 +57,18 @@ public class GatherCraftingOverlay {
             if (!GatherSettings.get().enabled) return;
             if (!(screen instanceof CraftingScreen)) return;
             craftCache = buildQuickCraftList();
+            lastCraftCacheMs = System.currentTimeMillis();
             panelScroll = 0;
             panelOpen = false;
             panelAnim = 0.0F;
 
             ScreenEvents.afterRender(screen).register((s, ctx, mx, my, delta) -> {
                 hoveredLines = null;
-                craftCache = buildQuickCraftList();
+                long now = System.currentTimeMillis();
+                if (now - lastCraftCacheMs >= 500) {
+                    craftCache = buildQuickCraftList();
+                    lastCraftCacheMs = now;
+                }
                 renderOverlay((CraftingScreen) s, ctx, mx, my);
                 if (hoveredLines != null) {
                     ctx.drawTooltip(client.textRenderer, hoveredLines, tooltipX, tooltipY);
@@ -126,8 +137,8 @@ public class GatherCraftingOverlay {
         MinecraftClient client = MinecraftClient.getInstance();
         for (int row = 0; row < rowsVisible && row + panelScroll < craftCache.size(); row++) {
             CraftEntry ce = craftCache.get(row + panelScroll);
-            Item item = Registries.ITEM.get(Identifier.of(ce.itemId()));
-            if (item == null) continue;
+            ItemStack stack = ce.stack();
+            if (stack.isEmpty()) continue;
 
             int rowY = rowsTop + row * ROW_H;
             boolean rowHov = mx >= panelX + 2 && mx <= panelX + PANEL_W - 2 && my >= rowY && my <= rowY + ROW_H - 2;
@@ -135,8 +146,8 @@ public class GatherCraftingOverlay {
             int itemSlotX = panelX + 9;
             int itemSlotY = rowY + 4;
             renderItemSlot(ctx, itemSlotX, itemSlotY, skin);
-            ctx.drawItem(item.getDefaultStack(), itemSlotX + 1, itemSlotY + 1);
-            ctx.drawText(client.textRenderer, item.getName(), panelX + 33, rowY + 4, skin.textColor, false);
+            ctx.drawItem(stack, itemSlotX + 1, itemSlotY + 1);
+            ctx.drawText(client.textRenderer, stack.getName(), panelX + 33, rowY + 4, skin.textColor, false);
 
             int stillNeed = 0;
             int maxCraft = 0;
@@ -373,13 +384,8 @@ public class GatherCraftingOverlay {
         return screenX(screen) != (screen.width - ((HandledScreenAccessor) screen).gather$getBackgroundWidth()) / 2;
     }
 
-    private static boolean darkMode() {
-        MinecraftClient client = MinecraftClient.getInstance();
-        return client != null && client.getResourceManager().getResource(DARK_MODE_MARKER).isPresent();
-    }
-
     private static Skin skin() {
-        return darkMode() ? Skin.DARK : Skin.LIGHT;
+        return Skin.LIGHT;
     }
 
     private record Skin(int panelColor, int lightEdgeColor, int darkEdgeColor, int innerEdgeColor, int dividerColor,
@@ -396,14 +402,6 @@ public class GatherCraftingOverlay {
                 0xFF162335, 0xFF07111F, 0xFF3A5570,
                 0xFFCCDDFF, 0xFFCCDDFF, 0xFF8DA1B8, 0xFF17283B, 0xFF253C56,
                 0x22445566, 0xFF445566, 0xFF223344,
-                0xFF000000, 0xFFFFFFFF);
-        private static final Skin DARK = new Skin(
-                0xF00A101A, 0xFF26384C, 0xFF03070C, 0xFF142236, 0xFF26384C,
-                0x77000000,
-                0x44203042, 0x99507091, 0xFF0A101A, 0xFF445B76,
-                0xFF101A28, 0xFF03070C, 0xFF445B76,
-                0xFFE1ECFF, 0xFFFFFFFF, 0xFF9EB3CA, 0xFF111A27, 0xFF253C56,
-                0x33445566, 0xFF5D7188, 0xFF2D3F55,
                 0xFF000000, 0xFFFFFFFF);
     }
 
@@ -443,7 +441,11 @@ public class GatherCraftingOverlay {
         Map<String, CraftEntry> byItem = new LinkedHashMap<>();
         for (int j : ordered) {
             String id = nodes.get(j).itemId;
-            byItem.computeIfAbsent(id, k -> new CraftEntry(k, new ArrayList<>())).indices().add(j);
+            byItem.computeIfAbsent(id, k -> {
+                Item it = ITEM_ID_CACHE.computeIfAbsent(k, s -> Registries.ITEM.get(Identifier.of(s)));
+                ItemStack st = it != null ? it.getDefaultStack() : ItemStack.EMPTY;
+                return new CraftEntry(k, st, new ArrayList<>());
+            }).indices().add(j);
         }
         return new ArrayList<>(byItem.values());
     }
@@ -497,7 +499,7 @@ public class GatherCraftingOverlay {
             if (child.depth <= node.depth) break;
             if (child.depth != node.depth + 1 || child.needed <= 0) continue;
             int ingNeeded = (int) Math.ceil((double) child.needed * outputCount / node.needed);
-            Item childItem = Registries.ITEM.get(Identifier.of(child.itemId));
+            Item childItem = ITEM_ID_CACHE.computeIfAbsent(child.itemId, k -> Registries.ITEM.get(Identifier.of(k)));
             List<Map.Entry<Item, Integer>> available = new ArrayList<>(countInventoryByType(childItem).entrySet());
             available.sort((a, b) -> b.getValue() - a.getValue());
             int rem = ingNeeded;
@@ -578,7 +580,7 @@ public class GatherCraftingOverlay {
                 ingNeeded -= fromVirtual;
             }
             if (ingNeeded > 0) {
-                Item childItem = Registries.ITEM.get(Identifier.of(child.itemId));
+                Item childItem = ITEM_ID_CACHE.computeIfAbsent(child.itemId, k -> Registries.ITEM.get(Identifier.of(k)));
                 List<Map.Entry<Item, Integer>> available = new ArrayList<>(countInventoryByType(childItem).entrySet());
                 available.sort((a, b) -> b.getValue() - a.getValue());
                 int rem = ingNeeded;
@@ -600,25 +602,38 @@ public class GatherCraftingOverlay {
     }
 
     private static int countForId(String itemId) {
-        Item it = Registries.ITEM.get(Identifier.of(itemId));
+        Item it = ITEM_ID_CACHE.computeIfAbsent(itemId, k -> Registries.ITEM.get(Identifier.of(k)));
         if (it == null) return 0;
-        int inv = countInventoryByType(it).values().stream().mapToInt(Integer::intValue).sum();
+        int inv = 0;
+        for (int c : countInventoryByType(it).values()) inv += c;
         return inv + (GatherSettings.get().countChests ? GatherState.get().getTrackedChestCountMatching(itemId) : 0);
     }
 
     private static Map<Item, Integer> countInventoryByType(Item neededItem) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null) return Map.of();
-        Set<TagKey<Item>> tags = neededItem.getRegistryEntry()
-                .streamTags().collect(Collectors.toSet());
+        Set<TagKey<Item>> tags = ITEM_TAG_CACHE.computeIfAbsent(neededItem,
+                k -> k.getRegistryEntry().streamTags().collect(Collectors.toSet()));
         Map<Item, Integer> result = new LinkedHashMap<>();
         for (int i = 0; i < client.player.getInventory().size(); i++) {
             var stack = client.player.getInventory().getStack(i);
             if (stack.isEmpty()) continue;
             Item inv = stack.getItem();
-            if (inv == neededItem
-                    || (!tags.isEmpty() && inv.getRegistryEntry().streamTags().anyMatch(tags::contains))) {
+            if (inv == neededItem || (!tags.isEmpty() && !Collections.disjoint(tags,
+                    ITEM_TAG_CACHE.computeIfAbsent(inv, k -> k.getRegistryEntry().streamTags().collect(Collectors.toSet()))))) {
                 result.merge(inv, stack.getCount(), Integer::sum);
+            }
+            if (inv instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
+                var container = stack.get(DataComponentTypes.CONTAINER);
+                if (container == null) continue;
+                for (var inner : container.iterateNonEmpty()) {
+                    if (inner.isEmpty()) continue;
+                    Item innerItem = inner.getItem();
+                    if (innerItem == neededItem || (!tags.isEmpty() && !Collections.disjoint(tags,
+                            ITEM_TAG_CACHE.computeIfAbsent(innerItem, k -> k.getRegistryEntry().streamTags().collect(Collectors.toSet()))))) {
+                        result.merge(innerItem, inner.getCount(), Integer::sum);
+                    }
+                }
             }
         }
         return result;
