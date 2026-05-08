@@ -70,7 +70,7 @@ public class GatherTutorialScreen extends Screen {
             (sw, sh) -> new int[]{ 0, 0, sw, sh },
             "Press §e§l[G]§r to open the Gather menu at any time.",
             "Manage goals, lists, chest scanning, and settings."),
-        step("Three Tabs", BgType.MENU, 0,
+        stepC("Three Tabs", BgType.MENU, 0,
             (sw, sh) -> tabsOnly(sw),
             "§eMy Lists§r — active goals.   §eAdd Items§r — search & add goals.",
             "§eRecent§r — quickly re-add past goals for this world."),
@@ -83,7 +83,7 @@ public class GatherTutorialScreen extends Screen {
             "§b+More§r mode: adds N more to gather, ignores what you already have.",
             "§bTotal§r mode: sets a full target — existing items count toward it.",
             "Toggle with the §e+More / Total§r button in the right panel."),
-        step("Goal Lists", BgType.MENU, 0,
+        stepC("Goal Lists", BgType.MENU, 0,
             (sw, sh) -> newListRegion(sw, sh),
             "Press §e+ New List§r to create a named list for any project.",
             "§7Right-click§r a header to hide/show in HUD.  §7Drag§r items to reorder."),
@@ -105,9 +105,9 @@ public class GatherTutorialScreen extends Screen {
             "§a§lCollector§r shulker auto-pulls needed items as you play.",
             "§bAll Goals§r: pulls everything needed.  §bCertain§r: pick specific items.",
             "§bKeep 1§r: leaves 1 of each item in inventory instead of moving all."),
-        step("You're all set!", BgType.WORLD, -1, null,
+        stepC("You're all set!", BgType.WORLD, -1, null,
             "Add goals, start collecting, and let Gather track the rest.",
-            "Find this tour again via §eSettings → Help§r."),
+            "Find this tour again via §eSettings → Tutorial§r."),
     };
 
     // ── Fake HUD example data ────────────────────────────────────────────────
@@ -222,7 +222,7 @@ public class GatherTutorialScreen extends Screen {
 
     private int cardWidth(Step s) {
         if (s.pos() == CardPos.CENTER)                          return Math.min(CARD_W_CTR, width - 16);
-        if (s.bg() == BgType.MENU && rightColAvail() >= 120)   return rightColAvail();
+        if (s.bg() == BgType.MENU && s.menuTab() == 1 && rightColAvail() >= 120) return rightColAvail();
         return Math.min(CARD_W, width - 16);
     }
 
@@ -236,8 +236,12 @@ public class GatherTutorialScreen extends Screen {
     }
 
     private int targetCardX(int cw, Step s, int[] hl) {
-        if (s.pos() == CardPos.CENTER)                          return width / 2 - cw / 2;
-        if (s.bg() == BgType.MENU && rightColAvail() >= 120)   return menuRightColX();
+        if (s.pos() == CardPos.CENTER) {
+            int x = width / 2 - cw / 2;
+            if (s.bg() == BgType.MENU) x = Math.min(x, menuRightColX() - 10 - cw);
+            return Math.max(8, Math.min(width - cw - 8, x));
+        }
+        if (s.bg() == BgType.MENU && s.menuTab() == 1 && rightColAvail() >= 120) return menuRightColX();
         if (hl == null) return width / 2 - cw / 2;
         int hlCx = hl[0] + hl[2] / 2;
         return Math.max(8, Math.min(width - cw - 8, hlCx - cw / 2));
@@ -245,7 +249,7 @@ public class GatherTutorialScreen extends Screen {
 
     private int targetCardY(int ch, Step s, int[] hl) {
         if (s.pos() == CardPos.CENTER) return height / 2 - ch / 2;
-        if (s.bg() == BgType.MENU && rightColAvail() >= 120) {
+        if (s.bg() == BgType.MENU && s.menuTab() == 1 && rightColAvail() >= 120) {
             if (hl != null) {
                 int hlCy = hl[1] + hl[3] / 2;
                 return Math.max(8, Math.min(height - ch - 8, hlCy - ch / 2));
@@ -424,31 +428,72 @@ public class GatherTutorialScreen extends Screen {
         if (panX < 4) panX = bgX + 4;
         int panY = bgY + 18;
 
-        ctx.fill(panX, panY, panX + panW, panY + panH, 0xEE0D1620);
-        ctx.fill(panX, panY, panX + panW, panY + 1, 0xFF2A5A8C);
-        ctx.fill(panX, panY + panH - 1, panX + panW, panY + panH, 0xFF0A1422);
-        ctx.fill(panX, panY, panX + 1, panY + panH, 0xFF2A5A8C);
-        ctx.fill(panX + panW - 1, panY, panX + panW, panY + panH, 0xFF2A5A8C);
-        ctx.drawTextWithShadow(textRenderer, Text.literal("Crafting Goals"), panX + 6, panY + 6, 0xFF88AACC);
-        ctx.fill(panX + 4, panY + 16, panX + panW - 4, panY + 17, 0x33446688);
+        drawCraftingPanel(ctx, panX, panY, panW, panH);
+        ctx.drawText(textRenderer, Text.literal("Crafting Goals"), panX + 6, panY + 6, 0xFFCCDDFF, false);
+        drawCraftingCloseButton(ctx, panX + panW - 15, panY + 5);
 
         Object[][] rows = {
-            { Items.WOODEN_PICKAXE, "Wooden Pickaxe", "need 1  max 2" },
-            { Items.CRAFTING_TABLE, "Crafting Table",  "need 3  max 3" },
+            { Items.OAK_PLANKS, "Oak Planks", "need 179  max 300" },
+            { Items.STICK, "Stick", "need 75  max 292" },
+            { Items.OAK_SLAB, "Oak Slab", "need 280  max 301" },
+            { Items.CRAFTING_TABLE, "Crafting Table", "need 1  max 1" },
         };
-        int rowY = panY + 22;
-        for (Object[] row : rows) {
-            ctx.fill(panX + 4, rowY, panX + panW - 4, rowY + 26, 0x22AACCFF);
-            ctx.fill(panX + 4, rowY, panX + panW - 4, rowY + 1, 0x33336699);
+        int rowsTop = panY + 24;
+        int rowY = rowsTop;
+        for (int i = 0; i < 3; i++) {
+            Object[] row = rows[i];
+            drawCraftingSlotRow(ctx, panX + 5, rowY, panW - 13, 26, false);
             net.minecraft.item.Item item = (net.minecraft.item.Item) row[0];
-            drawSlot(ctx, panX + 8, rowY + 4, 18);
-            ctx.drawItem(item.getDefaultStack(), panX + 9, rowY + 5);
-            ctx.drawTextWithShadow(textRenderer, Text.literal((String)row[1]), panX + 32, rowY + 5, 0xFFCCDDEE);
-            ctx.drawTextWithShadow(textRenderer, Text.literal((String)row[2]), panX + 32, rowY + 15, 0xFF667788);
+            drawCraftingItemSlot(ctx, panX + 9, rowY + 4);
+            ctx.drawItem(item.getDefaultStack(), panX + 10, rowY + 5);
+            ctx.drawText(textRenderer, Text.literal((String)row[1]), panX + 33, rowY + 4, 0xFFCCDDFF, false);
+            ctx.drawText(textRenderer, Text.literal((String)row[2]), panX + 33, rowY + 15, 0xFF8DA1B8, false);
             rowY += 28;
         }
-        ctx.drawTextWithShadow(textRenderer, Text.literal("Click row to craft  /  right-click all"),
-                panX + 6, rowY + 4, 0xFF445566);
+
+        int barX = panX + panW - 5;
+        int barY = rowsTop;
+        int barH = 3 * 28 - 2;
+        int thumbH = Math.max(16, barH * 3 / rows.length);
+        ctx.fill(barX, barY, barX + 3, barY + barH, 0x22445566);
+        ctx.fill(barX, barY, barX + 3, barY + thumbH, 0xFF445566);
+        ctx.fill(barX + 1, barY + 1, barX + 3, barY + thumbH, 0xFF223344);
+    }
+
+    private void drawCraftingPanel(DrawContext ctx, int x, int y, int w, int h) {
+        ctx.fill(x + 3, y + 3, x + w + 3, y + h + 3, 0x66000000);
+        ctx.fill(x, y, x + w, y + h, 0xEE0D1826);
+        ctx.fill(x, y, x + w, y + 1, 0xFF334455);
+        ctx.fill(x, y, x + 1, y + h, 0xFF334455);
+        ctx.fill(x + w - 1, y, x + w, y + h, 0xFF07111F);
+        ctx.fill(x, y + h - 1, x + w, y + h, 0xFF07111F);
+        ctx.fill(x + 1, y + 1, x + w - 1, y + 2, 0xFF1D3045);
+        ctx.fill(x + 1, y + 1, x + 2, y + h - 1, 0xFF1D3045);
+        ctx.fill(x + 4, y + 20, x + w - 4, y + 21, 0xFF334455);
+    }
+
+    private void drawCraftingCloseButton(DrawContext ctx, int x, int y) {
+        ctx.fill(x, y, x + 9, y + 9, 0xFF17283B);
+        ctx.drawText(textRenderer, Text.literal("x"), x + 2, y, 0xFFCCDDFF, false);
+    }
+
+    private static void drawCraftingSlotRow(DrawContext ctx, int x, int y, int w, int h, boolean hovered) {
+        ctx.fill(x, y, x + w, y + h, 0xFF101C2C);
+        ctx.fill(x + 2, y + 2, x + w - 1, y + h - 1, hovered ? 0x88334466 : 0x33223344);
+        ctx.fill(x, y, x + w, y + 1, 0xFF101C2C);
+        ctx.fill(x, y, x + 1, y + h, 0xFF101C2C);
+        ctx.fill(x + 1, y + 1, x + w - 1, y + 2, 0xFF101C2C);
+        ctx.fill(x + 1, y + 1, x + 2, y + h - 1, 0xFF101C2C);
+        ctx.fill(x + w - 2, y + 1, x + w, y + h, 0xFF3A5570);
+        ctx.fill(x + 1, y + h - 2, x + w, y + h, 0xFF3A5570);
+    }
+
+    private static void drawCraftingItemSlot(DrawContext ctx, int x, int y) {
+        ctx.fill(x, y, x + 18, y + 18, 0xFF162335);
+        ctx.fill(x, y, x + 18, y + 1, 0xFF07111F);
+        ctx.fill(x, y, x + 1, y + 18, 0xFF07111F);
+        ctx.fill(x + 17, y, x + 18, y + 18, 0xFF3A5570);
+        ctx.fill(x, y + 17, x + 18, y + 18, 0xFF3A5570);
     }
 
     private static final Identifier SHULKER_TEX =

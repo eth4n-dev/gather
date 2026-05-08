@@ -242,9 +242,6 @@ public class GatherMenuScreen extends Screen {
         else if (activeTab == TAB_RECENT) renderRecentTab(ctx, mx, my, lx, ly);
         else                              renderAddTab(ctx, mx, my, lx, ly);
 
-        // Always show the mode toggle panel in tutorial, so right side is never empty
-        if (isTutorial && activeTab != TAB_ADD) renderModeTogglePanel(ctx, mx, my);
-
         if (!suppressBottomBar) drawBottomBar(ctx, mx, my);
         super.render(ctx, mx, my, delta);
 

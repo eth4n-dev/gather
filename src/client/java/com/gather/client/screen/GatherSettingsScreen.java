@@ -121,14 +121,23 @@ public class GatherSettingsScreen extends Screen {
                 .dimensions(layoutLeft + panelPad + prefButtonW + prefButtonGap, prefPanelY + cardFirstButtonY, prefButtonW, 20)
                 .build());
 
+        int footerY = prefPanelY + 88;
+        int footerGap = 8;
+        int footerButtonW = 86;
+        int footerX = cx - (footerButtonW * 3 + footerGap * 2) / 2;
         addDrawableChild(ButtonWidget
                 .builder(Text.literal("Help"), btn -> client.setScreen(new GatherHelpScreen(this, false)))
-                .dimensions(cx - 100, prefPanelY + 88, 95, 20)
+                .dimensions(footerX, footerY, footerButtonW, 20)
+                .build());
+
+        addDrawableChild(ButtonWidget
+                .builder(Text.literal("Tutorial"), btn -> client.setScreen(new GatherTutorialScreen()))
+                .dimensions(footerX + footerButtonW + footerGap, footerY, footerButtonW, 20)
                 .build());
 
         addDrawableChild(ButtonWidget
                 .builder(Text.literal("Done"), btn -> close())
-                .dimensions(cx + 5, prefPanelY + 88, 95, 20)
+                .dimensions(footerX + (footerButtonW + footerGap) * 2, footerY, footerButtonW, 20)
                 .build());
     }
 
