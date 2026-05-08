@@ -198,7 +198,7 @@ public class GatherSettingsScreen extends Screen {
                     Text.literal("OFF keeps the regular scale animation."));
         } else if (inside(mx, my, workflowX + panelPad, visualPanelY + cardFirstButtonY, buttonW, 20)) {
             setTooltip(mx, my,
-                    Text.literal("Options for Scan All — including marking nearby chests"),
+                    Text.literal("Options for Scan All, including marking nearby chests"),
                     Text.literal("so they appear in scan results."));
         } else if (inside(mx, my, workflowX + panelPad, visualPanelY + cardFirstButtonY + 28, buttonW, 20)) {
             setTooltip(mx, my,
@@ -214,7 +214,7 @@ public class GatherSettingsScreen extends Screen {
         } else if (inside(mx, my, layoutLeft + panelPad + prefButtonW + prefButtonGap, prefPanelY + cardFirstButtonY, prefButtonW, 20)) {
             setTooltip(mx, my,
                     Text.literal("Automatically remove goals once all materials are gathered."),
-                    Text.literal("Goals are permanently deleted — they won't come back."));
+                    Text.literal("Goals are permanently deleted; they won't come back."));
         }
     }
 

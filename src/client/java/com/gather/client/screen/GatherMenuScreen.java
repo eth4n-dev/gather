@@ -607,7 +607,7 @@ public class GatherMenuScreen extends Screen {
                     renderNodeRow(ctx, mx, my, lx, y, n.listIndex(), n.nodeIndex(), nodes.get(n.nodeIndex()), state);
                 }
                 case VisRow.Empty  e -> {
-                    ctx.drawTextWithShadow(textRenderer, Text.literal("  Empty — add items in Add Items tab"),
+                    ctx.drawTextWithShadow(textRenderer, Text.literal("  Empty - add items in Add Items tab"),
                             lx + 8, y + 10, 0xFF334455);
                 }
             }
@@ -799,7 +799,7 @@ public class GatherMenuScreen extends Screen {
         ctx.fill(lx, y, lx+LIST_W, y+1, 0xFF334455);
         ctx.drawTextWithShadow(textRenderer, Text.literal("Base materials:"), lx+4, y+4, 0xFF8899BB);
 
-        if (base.isEmpty()) { ctx.drawTextWithShadow(textRenderer, Text.literal("—"), lx+4, y+18, 0xFF445566); return; }
+        if (base.isEmpty()) { ctx.drawTextWithShadow(textRenderer, Text.literal("-"), lx+4, y+18, 0xFF445566); return; }
 
         List<Map.Entry<String, Integer>> entries = new ArrayList<>(base.entrySet());
         int tagW = (LIST_W - 12) / 2;
@@ -1187,7 +1187,7 @@ public class GatherMenuScreen extends Screen {
             return true;
         }
 
-        // Chest Mode toggle (list tab, left panel — only visible when Scan All is OFF)
+        // Chest Mode toggle (list tab, left panel; only visible when Scan All is OFF)
         if (activeTab == TAB_LIST && chestModeBtnW > 0
                 && my >= chestModeBtnY && my <= chestModeBtnY + 13
                 && mx >= chestModeBtnX && mx <= chestModeBtnX + chestModeBtnW) {
@@ -1430,7 +1430,7 @@ public class GatherMenuScreen extends Screen {
             doChainCraft(listIndex, ni, node, state); return true;
         }
 
-        // Left-click on root node non-button area — start drag potential
+        // Left-click on root node non-button area: start drag potential
         if (btn == 0 && node.depth == 0) {
             potentialDragList = listIndex;
             potentialDragNode = ni;
@@ -1560,7 +1560,7 @@ public class GatherMenuScreen extends Screen {
             commitEdit(); commitAddAmount(); commitRename(); close(); return true;
         }
 
-        // Picker key handling — takes full priority
+        // Picker key handling: takes full priority
         if (pendingAddItemId != null) {
             int n = GatherState.get().getListCount();
             if (key == GLFW.GLFW_KEY_ESCAPE) {

@@ -52,7 +52,7 @@ public class GatherTutorialScreen extends Screen {
     // §e = yellow  §a = green  §6 = gold  §b = aqua  §7 = gray  §l = bold  §o = italic  §r = reset
     private static final Step[] STEPS = {
         step("Welcome to Gather!", BgType.WORLD, -1, null,
-            "Gather tracks items you need — goals, materials, chests, crafting.",
+            "Gather tracks items you need: goals, materials, chests, crafting.",
             "Use §e← →§r or the buttons below to navigate."),
         step("Goals Column", BgType.WORLD, -1,
             (sw, sh) -> hudMod(sw, 0),
@@ -72,8 +72,8 @@ public class GatherTutorialScreen extends Screen {
             "Manage goals, lists, chest scanning, and settings."),
         stepC("Three Tabs", BgType.MENU, 0,
             (sw, sh) -> tabsOnly(sw),
-            "§eMy Lists§r — active goals.   §eAdd Items§r — search & add goals.",
-            "§eRecent§r — quickly re-add past goals for this world."),
+            "§eMy Lists§r: active goals.   §eAdd Items§r: search & add goals.",
+            "§eRecent§r: quickly re-add past goals for this world."),
         step("Adding Items", BgType.MENU, 1,
             (sw, sh) -> addWithTab(sw, sh),
             "Search by name or ID, set a quantity, and click to add a goal.",
@@ -81,7 +81,7 @@ public class GatherTutorialScreen extends Screen {
         stepC("Count Mode", BgType.MENU, 1,
             (sw, sh) -> addModeRegion(sw, sh),
             "§b+More§r mode: adds N more to gather, ignores what you already have.",
-            "§bTotal§r mode: sets a full target — existing items count toward it.",
+            "§bTotal§r mode: sets a full target; existing items count toward it.",
             "Toggle with the §e+More / Total§r button in the right panel."),
         stepC("Goal Lists", BgType.MENU, 0,
             (sw, sh) -> newListRegion(sw, sh),
@@ -93,7 +93,7 @@ public class GatherTutorialScreen extends Screen {
             "§aChest Outlines§r highlights known chests. Set range in its settings."),
         stepC("Item Finder", BgType.MENU, 0,
             (sw, sh) -> leftAbsolute(sw, Y_FINDER, 14),
-            "Select a needed item — a §acompass arrow§r appears near your crosshair.",
+            "Select a needed item; a §acompass arrow§r appears near your crosshair.",
             "Points to the nearest tracked chest containing that item."),
         step("Crafting Overlay", BgType.CRAFTING, -1,
             (sw, sh) -> craftingPanelRegion(sw, sh),
@@ -178,7 +178,7 @@ public class GatherTutorialScreen extends Screen {
         return new int[]{ cx - 75, y, 150, h };
     }
 
-    // Right-panel mode toggle — wide enough to cover the label + button + description text
+    // Right-panel mode toggle: wide enough to cover the label + button + description text
     private static int[] addModeRegion(int sw, int sh) {
         int lx   = sw / 2 - MENU_LIST_W / 2;
         int rpCx = (lx + MENU_LIST_W + sw) / 2;
