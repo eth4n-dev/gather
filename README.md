@@ -5,6 +5,7 @@ Gather is a Fabric mod for Minecraft Java Edition that helps players plan and co
 ## Features
 
 - Goal lists for blocks and items you want to gather.
+- Favourite items feature and Recent tab
 - Automatic material breakdown for craftable goals.
 - HUD tracking for goals, base materials, and craft-ready items.
 - Chest scanning and finder tools for stored materials.
