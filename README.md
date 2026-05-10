@@ -35,4 +35,4 @@ Optional:
 
 ## License
 
-Gather is licensed under the MIT License. See [LICENSE](LICENSE).
+Gather is licensed under the GPL-3.0 License. See [LICENSE](LICENSE).
