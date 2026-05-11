@@ -1,0 +1,28 @@
+ASSETS LICENSE
+Copyright (C) 2024-2026 eth4n-dev. All Rights Reserved.
+
+This license governs all non-code creative assets in the Gather mod, including but not
+limited to: textures, artwork, icons, logos, and graphical content located in
+src/main/resources/assets/ and associated directories.
+
+These assets are NOT covered by the GPL-3.0-or-later license that applies to the
+source code. See LICENSE for the source code terms.
+
+PERMITTED
+  - Using Gather (including forks built from the GPL source code) with these assets
+    as distributed in official Gather releases.
+
+PROHIBITED without explicit written permission from eth4n-dev
+  - Redistributing, hosting, or publishing these assets outside of official Gather releases.
+  - Using these assets in derivative mods, forks, resource packs, or texture packs.
+  - Modifying these assets and distributing the modified versions.
+
+BRANDING
+  - The name "Gather" and its associated logo/branding may not be used by forks or
+    derivative works in a way that implies official status or association with the
+    original author.
+  - Any fork or modified version must clearly identify itself as unofficial.
+    Acceptable: "Unofficial Gather Fork", "[Name]'s Fork of Gather", etc.
+  - You may not present your fork as "the official" or "the original" Gather mod.
+
+For permissions: https://github.com/eth4n-dev/gather

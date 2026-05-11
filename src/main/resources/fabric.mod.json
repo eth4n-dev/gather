@@ -10,7 +10,7 @@
     "sources": "https://github.com/eth4n-dev/gather",
     "issues": "https://github.com/eth4n-dev/gather/issues"
   },
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "icon": "assets/gather/icon.png",
   "environment": "*",
   "entrypoints": {
