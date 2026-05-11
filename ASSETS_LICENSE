@@ -18,9 +18,8 @@ PROHIBITED without explicit written permission from eth4n-dev
   - Modifying these assets and distributing the modified versions.
 
 BRANDING
-  - The name "Gather" and its associated logo/branding may not be used by forks or
-    derivative works in a way that implies official status or association with the
-    original author.
+  - Modified versions and forks may not use the name "Gather" or associated branding
+    in a way that implies they are the official project.
   - Any fork or modified version must clearly identify itself as unofficial.
     Acceptable: "Unofficial Gather Fork", "[Name]'s Fork of Gather", etc.
   - You may not present your fork as "the official" or "the original" Gather mod.
