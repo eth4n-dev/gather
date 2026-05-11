@@ -1,27 +1,35 @@
 ASSETS LICENSE
+
 Copyright (C) 2024-2026 eth4n-dev. All Rights Reserved.
 
 This license governs all non-code creative assets in the Gather mod, including but not
-limited to: textures, artwork, icons, logos, and graphical content located in
-src/main/resources/assets/ and associated directories.
+limited to textures, artwork, icons, logos, sounds, GUI elements, and other graphical
+or media content located in src/main/resources/assets/ and associated directories.
 
 These assets are NOT covered by the GPL-3.0-or-later license that applies to the
 source code. See LICENSE for the source code terms.
 
 PERMITTED
-  - Using Gather (including forks built from the GPL source code) with these assets
-    as distributed in official Gather releases.
+
+* Using Gather, including official releases and unmodified redistributions, with these assets included.
+* Creating forks from the GPL source code, provided these assets are removed or replaced unless explicit written permission is granted.
 
 PROHIBITED without explicit written permission from eth4n-dev
-  - Redistributing, hosting, or publishing these assets outside of official Gather releases.
-  - Using these assets in derivative mods, forks, resource packs, or texture packs.
-  - Modifying these assets and distributing the modified versions.
+
+* Redistributing, hosting, or publishing these assets outside official Gather releases.
+* Using these assets in derivative mods, forks, resource packs, or texture packs.
+* Modifying these assets and distributing the modified versions.
 
 BRANDING
-  - Modified versions and forks may not use the name "Gather" or associated branding
-    in a way that implies they are the official project.
-  - Any fork or modified version must clearly identify itself as unofficial.
-    Acceptable: "Unofficial Gather Fork", "[Name]'s Fork of Gather", etc.
-  - You may not present your fork as "the official" or "the original" Gather mod.
 
-For permissions: https://github.com/eth4n-dev/gather
+* Modified versions and forks may not use the name "Gather" or associated branding
+  in a way that implies they are the official project.
+* Any fork or modified version must clearly identify itself as unofficial.
+  Examples include:
+
+  * "Unofficial Gather Fork"
+  * "[Name]'s Fork of Gather"
+* Forks and modified versions may not present themselves as the official or original Gather mod.
+
+For permissions:
+https://github.com/eth4n-dev/gather
