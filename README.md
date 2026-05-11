@@ -35,4 +35,8 @@ Optional:
 
 ## License
 
-Gather is licensed under the GPL-3.0 License. See [LICENSE](LICENSE).
+The source code is licensed under [GPL-3.0-or-later](LICENSE).
+
+Textures, artwork, icons, logos, and other creative assets are Copyright (C) 2024-2026 eth4n-dev. All Rights Reserved. See [ASSETS_LICENSE](ASSETS_LICENSE).
+
+Modified versions and forks may not use the name "Gather" or associated branding in a way that implies they are the official project.
