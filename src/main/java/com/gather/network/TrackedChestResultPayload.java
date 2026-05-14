@@ -1,28 +1,28 @@
 package com.gather.network;
 
 import com.gather.GatherMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 import java.util.HashMap;
 import java.util.Map;
 
-public record TrackedChestResultPayload(Map<Long, Map<String, Integer>> chestItemCounts) implements CustomPayload {
+public record TrackedChestResultPayload(Map<Long, Map<String, Integer>> chestItemCounts) implements CustomPacketPayload {
 
-    public static final Id<TrackedChestResultPayload> ID =
-            new Id<>(Identifier.of(GatherMod.MOD_ID, "tracked_chest_result"));
+    public static final CustomPacketPayload.Type<TrackedChestResultPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(GatherMod.MOD_ID, "tracked_chest_result"));
 
-    public static final PacketCodec<RegistryByteBuf, TrackedChestResultPayload> CODEC =
-            PacketCodec.of(
-                    (v, buf) -> {
+    public static final StreamCodec<RegistryFriendlyByteBuf, TrackedChestResultPayload> CODEC =
+            StreamCodec.of(
+                    (buf, v) -> {
                         buf.writeInt(v.chestItemCounts().size());
                         v.chestItemCounts().forEach((pos, counts) -> {
                             buf.writeLong(pos);
                             buf.writeInt(counts.size());
                             counts.forEach((id, count) -> {
-                                buf.writeString(id);
+                                buf.writeUtf(id);
                                 buf.writeInt(count);
                             });
                         });
@@ -35,7 +35,7 @@ public record TrackedChestResultPayload(Map<Long, Map<String, Integer>> chestIte
                             int size = buf.readInt();
                             Map<String, Integer> counts = new HashMap<>();
                             for (int j = 0; j < size; j++) {
-                                counts.put(buf.readString(), buf.readInt());
+                                counts.put(buf.readUtf(), buf.readInt());
                             }
                             map.put(pos, counts);
                         }
@@ -44,5 +44,5 @@ public record TrackedChestResultPayload(Map<Long, Map<String, Integer>> chestIte
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() { return ID; }
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return ID; }
 }

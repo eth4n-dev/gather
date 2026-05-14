@@ -4,16 +4,16 @@ import com.gather.client.screen.GatherHelpScreen;
 import com.gather.client.screen.GatherMenuScreen;
 import com.gather.client.screen.GatherTutorialScreen;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import org.lwjgl.glfw.GLFW;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.item.Item;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.TagKey;
+import net.minecraft.resources.Identifier;
+import net.minecraft.core.BlockPos;
 
 import java.util.HashSet;
 import java.util.List;
@@ -40,14 +40,15 @@ public class GatherClientMod implements ClientModInitializer {
         GatherHud.register();
         WorldHighlightRenderer.register();
         GatherCraftingOverlay.register();
+        GatherTradeCalculatorOverlay.register();
         GatherShulkerCollectorOverlay.register();
 
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
-            dispatcher.register(ClientCommandManager.literal("gather")
-                .then(ClientCommandManager.literal("help")
+            dispatcher.register(ClientCommands.literal("gather")
+                .then(ClientCommands.literal("help")
                     .executes(ctx -> {
-                        net.minecraft.client.MinecraftClient mc = net.minecraft.client.MinecraftClient.getInstance();
-                        mc.send(() -> mc.setScreen(new GatherHelpScreen(null, false)));
+                        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+                        mc.execute(() -> mc.setScreen(new GatherHelpScreen(null, false)));
                         return 1;
                     }))));
 
@@ -65,23 +66,23 @@ public class GatherClientMod implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             GatherState.flushPendingSaveIfDue();
 
-            if (pendingHelpScreen && client.player != null && client.currentScreen == null) {
+            if (pendingHelpScreen && client.player != null && client.screen == null) {
                 pendingHelpScreen = false;
                 client.setScreen(new GatherTutorialScreen());
             }
 
-            while (GatherKeyBindings.openMenu.wasPressed()) {
+            while (GatherKeyBindings.openMenu.consumeClick()) {
                 if (client.player == null) return;
-                if (client.currentScreen == null) {
+                if (client.screen == null) {
                     client.setScreen(new GatherMenuScreen());
                 }
             }
 
-            while (GatherKeyBindings.manualScanToggle.wasPressed()) {
+            while (GatherKeyBindings.manualScanToggle.consumeClick()) {
                 if (client.player == null) return;
                 GatherSettings cfg = GatherSettings.get();
-                long handle = client.getWindow().getHandle();
-                if (scanModifiersHeld(cfg, handle) && client.currentScreen == null && cfg.enabled && !cfg.countChests) {
+                long handle = client.getWindow().handle();
+                if (scanModifiersHeld(cfg, handle) && client.screen == null && cfg.enabled && !cfg.countChests) {
                     GatherState s = GatherState.get();
                     s.setChestScanMode(!s.isChestScanMode());
                 }
@@ -99,13 +100,13 @@ public class GatherClientMod implements ClientModInitializer {
                     GatherClientNetworking.updateCollectorTargets(collectorTargets);
                 }
                 if (GatherSettings.get().countChests) {
-                    long ck = chunkKey(client.player.getBlockPos());
+                    long ck = chunkKey(client.player.blockPosition());
                     autoTrackFallbackCount++;
                     if (ck != lastAutoTrackChunkKey || autoTrackFallbackCount >= 15) {
                         lastAutoTrackChunkKey = ck;
                         autoTrackFallbackCount = 0;
                         List<String> targets = state.getChestScanTargets(itemId -> {
-                            Item item = Registries.ITEM.get(Identifier.of(itemId));
+                            Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(itemId));
                             return item == null ? 0 : GatherHud.countInventoryTagAware(client, item);
                         });
                         GatherClientNetworking.requestAutoTrack(GatherSettings.get().chestScanRadius, targets);
@@ -124,8 +125,8 @@ public class GatherClientMod implements ClientModInitializer {
                     for (int i = 0; i < batchSize; i++) {
                         long pos = allChestList.get(fallbackRefreshIndex);
                         fallbackRefreshIndex = (fallbackRefreshIndex + 1) % total;
-                        BlockPos bp = BlockPos.fromLong(pos);
-                        if (client.world != null && client.world.isChunkLoaded(bp.getX() >> 4, bp.getZ() >> 4)) {
+                        BlockPos bp = BlockPos.of(pos);
+                        if (client.level != null && client.level.getChunkSource().hasChunk(bp.getX() >> 4, bp.getZ() >> 4)) {
                             batch.add(pos);
                         }
                     }
@@ -139,7 +140,7 @@ public class GatherClientMod implements ClientModInitializer {
             autoSyncTimer = 0;
 
             java.util.function.Function<String, Integer> totalCounter = itemId -> {
-                Item it = ITEM_LOOKUP_CACHE.computeIfAbsent(itemId, k -> Registries.ITEM.get(Identifier.of(k)));
+                Item it = ITEM_LOOKUP_CACHE.computeIfAbsent(itemId, k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
                 int count = it == null ? 0 : GatherHud.countInventoryTagAware(client, it);
                 if (GatherSettings.get().countChests) {
                     count += GatherState.get().getTrackedChestCountMatching(itemId);

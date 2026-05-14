@@ -1,34 +1,45 @@
 package com.gather.client;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.sound.PositionedSoundInstance;
-import net.minecraft.sound.SoundEvent;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.network.chat.Component;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 
 public final class GatherUi {
-    private static final SoundEvent MENU_SWOOSH = SoundEvent.of(Identifier.of("gather", "menu_swoosh"));
+    private static final SoundEvent MENU_SWOOSH = SoundEvent.createVariableRangeEvent(Identifier.fromNamespaceAndPath("gather", "menu_swoosh"));
 
     private GatherUi() {}
 
     public static void playClickSound() {
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         if (client != null) {
-            client.getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.UI_BUTTON_CLICK, 1.0F));
+            client.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
         }
     }
 
     public static void playMenuOpenSound() {
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         if (client != null) {
-            client.getSoundManager().play(PositionedSoundInstance.ui(MENU_SWOOSH, 1.12F));
+            client.getSoundManager().play(SimpleSoundInstance.forUI(MENU_SWOOSH, 1.12F));
         }
     }
 
     public static void playMenuCloseSound() {
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         if (client != null) {
-            client.getSoundManager().play(PositionedSoundInstance.ui(MENU_SWOOSH, 0.82F));
+            client.getSoundManager().play(SimpleSoundInstance.forUI(MENU_SWOOSH, 0.82F));
         }
+    }
+
+    public static Component itemName(Item item) {
+        return item.getName(item.getDefaultInstance());
+    }
+
+    public static Component itemName(ItemStack stack) {
+        return stack.getHoverName();
     }
 }

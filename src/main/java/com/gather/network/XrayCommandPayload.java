@@ -1,21 +1,21 @@
 package com.gather.network;
 
 import com.gather.GatherMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
-public record XrayCommandPayload(boolean enable) implements CustomPayload {
-    public static final Id<XrayCommandPayload> ID =
-            new Id<>(Identifier.of(GatherMod.MOD_ID, "xray_command"));
+public record XrayCommandPayload(boolean enable) implements CustomPacketPayload {
+    public static final CustomPacketPayload.Type<XrayCommandPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(GatherMod.MOD_ID, "xray_command"));
 
-    public static final PacketCodec<RegistryByteBuf, XrayCommandPayload> CODEC =
-            PacketCodec.of(
-                    (v, buf) -> buf.writeBoolean(v.enable()),
+    public static final StreamCodec<RegistryFriendlyByteBuf, XrayCommandPayload> CODEC =
+            StreamCodec.of(
+                    (buf, v) -> buf.writeBoolean(v.enable()),
                     buf -> new XrayCommandPayload(buf.readBoolean())
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() { return ID; }
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return ID; }
 }

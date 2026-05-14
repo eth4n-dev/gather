@@ -1,20 +1,20 @@
 package com.gather.client.mixin;
 
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
-@Mixin(HandledScreen.class)
+@Mixin(AbstractContainerScreen.class)
 public interface HandledScreenAccessor {
-    @Accessor("x")
+    @Accessor("leftPos")
     int gather$getX();
 
-    @Accessor("y")
+    @Accessor("topPos")
     int gather$getY();
 
-    @Accessor("backgroundWidth")
+    @Accessor("imageWidth")
     int gather$getBackgroundWidth();
 
-    @Accessor("backgroundHeight")
+    @Accessor("imageHeight")
     int gather$getBackgroundHeight();
 }

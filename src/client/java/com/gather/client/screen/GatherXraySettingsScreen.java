@@ -1,20 +1,21 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherSettings;
 import com.gather.client.GatherState;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.network.chat.Component;
 
 public class GatherXraySettingsScreen extends Screen {
 
     private final Screen parent;
-    private java.util.List<net.minecraft.text.Text> hoveredTooltip = null;
+    private java.util.List<net.minecraft.network.chat.Component> hoveredTooltip = null;
     private int tooltipX, tooltipY;
 
     public GatherXraySettingsScreen(Screen parent) {
-        super(Text.literal("Xray / Glow Settings"));
+        super(Component.literal("Xray / Glow Settings"));
         this.parent = parent;
     }
 
@@ -24,100 +25,100 @@ public class GatherXraySettingsScreen extends Screen {
         int cy = height / 2;
         boolean xrayAllowed = GatherState.isServerXrayAllowed();
 
-        ButtonWidget dropXray = ButtonWidget
+        Button dropXray = Button
                 .builder(stateText("Drop Xray", GatherSettings.get().droppedItemXray), btn -> {
                     GatherSettings.get().droppedItemXray = !GatherSettings.get().droppedItemXray;
                     GatherSettings.get().save();
                     btn.setMessage(stateText("Drop Xray", GatherSettings.get().droppedItemXray));
                 })
-                .dimensions(cx - 100, cy - 37, 200, 20)
+                .bounds(cx - 100, cy - 37, 200, 20)
                 .build();
         dropXray.active = xrayAllowed;
-        addDrawableChild(dropXray);
+        addRenderableWidget(dropXray);
 
-        ButtonWidget blockXray = ButtonWidget
+        Button blockXray = Button
                 .builder(stateText("Block Xray", GatherSettings.get().blockXray), btn -> {
                     GatherSettings.get().blockXray = !GatherSettings.get().blockXray;
                     GatherSettings.get().save();
                     btn.setMessage(stateText("Block Xray", GatherSettings.get().blockXray));
                 })
-                .dimensions(cx - 100, cy - 12, 200, 20)
+                .bounds(cx - 100, cy - 12, 200, 20)
                 .build();
         blockXray.active = xrayAllowed;
-        addDrawableChild(blockXray);
+        addRenderableWidget(blockXray);
 
-        ButtonWidget chestXray = ButtonWidget
+        Button chestXray = Button
                 .builder(stateText("Chest Outlines Xray", GatherSettings.get().chestXray), btn -> {
                     GatherSettings.get().chestXray = !GatherSettings.get().chestXray;
                     GatherSettings.get().save();
                     btn.setMessage(stateText("Chest Outlines Xray", GatherSettings.get().chestXray));
                 })
-                .dimensions(cx - 100, cy + 13, 200, 20)
+                .bounds(cx - 100, cy + 13, 200, 20)
                 .build();
         chestXray.active = xrayAllowed;
-        addDrawableChild(chestXray);
+        addRenderableWidget(chestXray);
 
-        addDrawableChild(ButtonWidget
-                .builder(Text.literal("Back"), btn -> close())
-                .dimensions(cx - 50, cy + 48, 100, 20)
+        addRenderableWidget(Button
+                .builder(Component.literal("Back"), btn -> onClose())
+                .bounds(cx - 50, cy + 48, 100, 20)
                 .build());
     }
 
     @Override
-    public void render(DrawContext ctx, int mx, int my, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor ctx, int mx, int my, float delta) {
         hoveredTooltip = null;
-        ctx.fill(0, 0, width, height, 0xCC111122);
-        ctx.drawCenteredTextWithShadow(textRenderer, title, width / 2, height / 2 - 55, 0xFFCCDDFF);
-        super.render(ctx, mx, my, delta);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
+        ctx.centeredText(font, title, width / 2, height / 2 - 55, 0xFFCCDDFF);
+        super.extractRenderState(ctx, mx, my, delta);
 
         int cx = width / 2, cy = height / 2;
         boolean xrayAllowed = GatherState.isServerXrayAllowed();
         if (!xrayAllowed) {
-            ctx.drawCenteredTextWithShadow(textRenderer,
-                    Text.literal("Xray disabled by server"),
+            ctx.centeredText(font,
+                    Component.literal("Xray disabled by server"),
                     width / 2, height / 2 - 55 + 14, 0xFFFF6655);
         }
         if (inside(mx, my, cx - 100, cy - 37, 200, 20)) {
             if (xrayAllowed) {
                 setTooltip(mx, my,
-                        Text.literal("Needed dropped items glow through walls."),
-                        Text.literal("Toggleable. Uses entity glow effect."));
+                        Component.literal("Needed dropped items glow through walls."),
+                        Component.literal("Toggleable. Uses entity glow effect."));
             } else {
                 setTooltip(mx, my,
-                        Text.literal("Xray not allowed on this server."),
-                        Text.literal("Ask an admin to run: /gatherop xray on"));
+                        Component.literal("Xray not allowed on this server."),
+                        Component.literal("Ask an admin to run: /gatherop xray on"));
             }
         } else if (inside(mx, my, cx - 100, cy - 12, 200, 20)) {
             if (xrayAllowed) {
                 setTooltip(mx, my,
-                        Text.literal("Needed placed blocks glow through walls."),
-                        Text.literal("WARNING: reveals ores/structures underground."),
-                        Text.literal("Can spoil cave and dungeon exploration."),
-                        Text.literal("Requires WhereIsIt/ChestTracker installed."));
+                        Component.literal("Needed placed blocks glow through walls."),
+                        Component.literal("WARNING: reveals ores/structures underground."),
+                        Component.literal("Can spoil cave and dungeon exploration."),
+                        Component.literal("Requires WhereIsIt/ChestTracker installed."));
             } else {
                 setTooltip(mx, my,
-                        Text.literal("Xray not allowed on this server."),
-                        Text.literal("Ask an admin to run: /gatherop xray on"));
+                        Component.literal("Xray not allowed on this server."),
+                        Component.literal("Ask an admin to run: /gatherop xray on"));
             }
         } else if (inside(mx, my, cx - 100, cy + 13, 200, 20)) {
             if (xrayAllowed) {
                 setTooltip(mx, my,
-                        Text.literal("Chest outlines show through walls (xray)."),
-                        Text.literal("OFF: depth-tested outlines, slightly better FPS."),
-                        Text.literal("Collector outlines always use xray regardless."));
+                        Component.literal("Chest outlines show through walls (xray)."),
+                        Component.literal("OFF: depth-tested outlines, slightly better FPS."),
+                        Component.literal("Collector outlines always use xray regardless."));
             } else {
                 setTooltip(mx, my,
-                        Text.literal("Xray not allowed on this server."),
-                        Text.literal("Ask an admin to run: /gatherop xray on"));
+                        Component.literal("Xray not allowed on this server."),
+                        Component.literal("Ask an admin to run: /gatherop xray on"));
             }
         }
 
         if (hoveredTooltip != null) {
-            ctx.drawTooltip(textRenderer, hoveredTooltip, tooltipX, tooltipY);
+            ctx.setComponentTooltipForNextFrame(font, hoveredTooltip, tooltipX, tooltipY);
         }
     }
 
-    private void setTooltip(int mx, int my, Text... lines) {
+    private void setTooltip(int mx, int my, Component... lines) {
         hoveredTooltip = java.util.List.of(lines);
         tooltipX = mx;
         tooltipY = my + 18;
@@ -127,14 +128,14 @@ public class GatherXraySettingsScreen extends Screen {
         return mx >= x && mx <= x + w && my >= y && my <= y + h;
     }
 
-    private static Text stateText(String label, boolean enabled) {
-        return Text.literal(label + ": ")
-                .append(Text.literal(enabled ? "ON" : "OFF").styled(style ->
+    private static Component stateText(String label, boolean enabled) {
+        return Component.literal(label + ": ")
+                .append(Component.literal(enabled ? "ON" : "OFF").withStyle(style ->
                         style.withColor(enabled ? 0x55FF77 : 0xFF6666)));
     }
 
     @Override
-    public void close() {
-        client.setScreen(parent);
+    public void onClose() {
+        minecraft.setScreen(parent);
     }
 }

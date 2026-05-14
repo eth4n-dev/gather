@@ -1,21 +1,22 @@
 package com.gather.client;
 
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import net.minecraft.block.ShulkerBoxBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
+import com.gather.client.screen.GatherMenuScreen;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 
-import net.minecraft.client.sound.PositionedSoundInstance;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.TagKey;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.core.BlockPos;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -71,7 +72,7 @@ public class GatherHud {
     }
 
     public static void register() {
-        HudRenderCallback.EVENT.register(GatherHud::onHudRender);
+        HudElementRegistry.addLast(net.minecraft.resources.Identifier.fromNamespaceAndPath("gather", "hud"), GatherHud::onHudRender);
     }
 
     public static void markDirty() {
@@ -83,8 +84,8 @@ public class GatherHud {
     public static boolean isCollectorShulker(ItemStack stack) {
         if (stack.isEmpty()) return false;
         if (!(stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock)) return false;
-        var cd = stack.get(DataComponentTypes.CUSTOM_DATA);
-        return cd != null && cd.copyNbt().getBoolean("gather_collector", false);
+        var cd = stack.get(DataComponents.CUSTOM_DATA);
+        return cd != null && cd.copyTag().getBooleanOr("gather_collector", false);
     }
 
     public static void reset() {
@@ -97,10 +98,20 @@ public class GatherHud {
         inventorySnapshot = null;
     }
 
-    private static void onHudRender(DrawContext context, net.minecraft.client.render.RenderTickCounter tickCounter) {
+    private static void onHudRender(GuiGraphicsExtractor context, net.minecraft.client.DeltaTracker tickCounter) {
         if (!GatherSettings.get().enabled) return;
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null || client.getOverlay() != null) return;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null || minecraft.getOverlay() != null) return;
+
+        // Render the menu close animation after the screen is dismissed so movement resumes immediately.
+        GatherMenuScreen ghost = GatherMenuScreen.ghostScreen;
+        if (ghost != null) {
+            if (System.currentTimeMillis() - ghost.closingAtMs >= ghost.ghostDurationMs()) {
+                GatherMenuScreen.ghostScreen = null;
+            } else {
+                ghost.extractRenderState(context, -1, -1, 0f);
+            }
+        }
 
         WorldHighlightRenderer.renderCollectorLabels(context);
 
@@ -108,14 +119,14 @@ public class GatherHud {
 
         GatherState state = GatherState.get();
         long now = System.currentTimeMillis();
-        HudModel model = getHudModel(client, state, now);
+        HudModel model = getHudModel(minecraft, state, now);
         List<GatherList> lists = model.lists();
         List<GoalEntry> goalEntries = model.goalEntries();
         List<MatEntry> matEntries = model.matEntries();
         List<HintEntry> hints = model.hints();
 
-        int screenH  = client.getWindow().getScaledHeight();
-        int screenW  = client.getWindow().getScaledWidth();
+        int screenH  = minecraft.getWindow().getGuiScaledHeight();
+        int screenW  = minecraft.getWindow().getGuiScaledWidth();
         GatherSettings settings = GatherSettings.get();
         int topY = Math.max(0, settings.layoutGoalsY);
         int maxContentH = Math.max(ROW_H_GOAL, screenH - topY - 12);
@@ -182,19 +193,17 @@ public class GatherHud {
             String line2 = "Right-click chests to tag / untag";
             String line3 = manualCount == 0 ? "No chests tagged yet"
                     : manualCount + " chest" + (manualCount == 1 ? "" : "s") + " tagged · Contents count toward goals";
-            int minBw = Math.max(client.textRenderer.getWidth(line1),
-                     Math.max(client.textRenderer.getWidth(line2), client.textRenderer.getWidth(line3))) + 12;
+            int minBw = Math.max(minecraft.font.width(line1),
+                     Math.max(minecraft.font.width(line2), minecraft.font.width(line3))) + 12;
             int bw = Math.max(minBw, settings.layoutManualScanW);
             int bh = 38;
             int bx = settings.layoutManualScanX < 0 ? sw / 2 - bw / 2 : settings.layoutManualScanX;
             int by = settings.layoutManualScanY;
             int textCenterX = bx + bw / 2;
-            context.fill(bx, by, bx + bw, by + bh, 0xCC001A1A);
-            context.fill(bx, by, bx + bw, by + 1, 0xFFFF9944);
-            context.fill(bx, by + bh - 1, bx + bw, by + bh, 0x88AA6622);
-            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line1), textCenterX, by + 4, 0xFFFFCC44);
-            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line2), textCenterX, by + 15, 0xFFCCBB88);
-            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line3), textCenterX, by + 26, manualCount == 0 ? 0xFF776655 : 0xFFFFDD99);
+            GatherTheme.drawNineSlice(context, GatherTheme.HUD_MANUAL_SCAN_PANEL, bx, by, bw, bh);
+            context.centeredText(minecraft.font, Component.literal(line1), textCenterX, by + 4, 0xFFFFCC44);
+            context.centeredText(minecraft.font, Component.literal(line2), textCenterX, by + 15, 0xFFCCBB88);
+            context.centeredText(minecraft.font, Component.literal(line3), textCenterX, by + 26, manualCount == 0 ? 0xFF776655 : 0xFFFFDD99);
         }
 
         // Small top-right badge for persistent scan modes
@@ -204,20 +213,20 @@ public class GatherHud {
             if (scanAllOn) {
                 int autoCount = state.getTrackedChests().size();
                 String badge = "• SCAN ALL" + (autoCount > 0 ? " (" + autoCount + ")" : "");
-                int bw = client.textRenderer.getWidth(badge) + 8;
+                int bw = minecraft.font.width(badge) + 8;
                 badgeX -= bw;
-                context.fill(badgeX, badgeY, badgeX + bw, badgeY + 11, 0xAA00332B);
-                context.drawTextWithShadow(client.textRenderer, Text.literal(badge), badgeX + 4, badgeY + 2, 0xFF33D6AA);
+                GatherTheme.drawNineSlice(context, GatherTheme.HUD_SCAN_ALL_BADGE, badgeX, badgeY, bw, 11);
+                context.text(minecraft.font, Component.literal(badge), badgeX + 4, badgeY + 2, 0xFF33D6AA);
                 badgeY += 13;
                 badgeX = sw - 4;
             }
             if (!scanAllOn && !state.getManualChests().isEmpty()) {
                 int mc = state.getManualChests().size();
                 String badge = "• MANUAL (" + mc + ")";
-                int bw = client.textRenderer.getWidth(badge) + 8;
+                int bw = minecraft.font.width(badge) + 8;
                 badgeX -= bw;
-                context.fill(badgeX, badgeY, badgeX + bw, badgeY + 11, 0xAA2B1A00);
-                context.drawTextWithShadow(client.textRenderer, Text.literal(badge), badgeX + 4, badgeY + 2, 0xFFFFAA44);
+                GatherTheme.drawNineSlice(context, GatherTheme.HUD_MANUAL_BADGE, badgeX, badgeY, bw, 11);
+                context.text(minecraft.font, Component.literal(badge), badgeX + 4, badgeY + 2, 0xFFFFAA44);
                 badgeY += 13;
             }
         }
@@ -225,19 +234,19 @@ public class GatherHud {
         // === CHEST FINDER INDICATOR ===
         {
             String finderItemId = state.getChestFinderItemId();
-            if (finderItemId != null && client.player != null) {
+            if (finderItemId != null && minecraft.player != null) {
                 Set<Long> finderChests = state.getChestsContaining(finderItemId);
-                BlockPos playerPos = client.player.getBlockPos();
+                BlockPos playerPos = minecraft.player.blockPosition();
                 BlockPos nearest = null;
                 double nearestDistSq = Double.MAX_VALUE;
                 for (long encoded : finderChests) {
-                    BlockPos pos = BlockPos.fromLong(encoded);
-                    double dist = playerPos.getSquaredDistance(pos);
+                    BlockPos pos = BlockPos.of(encoded);
+                    double dist = playerPos.distSqr(pos);
                     if (dist < nearestDistSq) { nearestDistSq = dist; nearest = pos; }
                 }
 
-                Item finderItem = ITEM_ID_CACHE.computeIfAbsent(finderItemId, k -> Registries.ITEM.get(Identifier.of(k)));
-                String itemDisplayName = finderItem != null ? finderItem.getName().getString() : finderItemId;
+                Item finderItem = ITEM_ID_CACHE.computeIfAbsent(finderItemId, k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
+                String itemDisplayName = finderItem != null ? com.gather.client.GatherUi.itemName(finderItem).getString() : finderItemId;
                 int totalCount = state.getTrackedChestCountMatching(finderItemId)
                                + state.getManualChestCountMatching(finderItemId);
                 int chestCount = finderChests.size();
@@ -250,15 +259,15 @@ public class GatherHud {
                     double dx = nearest.getX() - playerPos.getX();
                     double dz = nearest.getZ() - playerPos.getZ();
                     double chestYaw = Math.toDegrees(Math.atan2(-dx, dz));
-                    relativeAngle = ((chestYaw - client.player.getYaw()) % 360 + 540) % 360 - 180;
+                    relativeAngle = ((chestYaw - minecraft.player.getViewYRot(1.0F)) % 360 + 540) % 360 - 180;
                 }
 
                 // Info panel
                 int maxNameW = 90;
                 String dispName;
-                if (client.textRenderer.getWidth(itemDisplayName) > maxNameW) {
-                    dispName = client.textRenderer.trimToWidth(itemDisplayName,
-                            maxNameW - client.textRenderer.getWidth("..")) + "..";
+                if (minecraft.font.width(itemDisplayName) > maxNameW) {
+                    dispName = minecraft.font.plainSubstrByWidth(itemDisplayName,
+                            maxNameW - minecraft.font.width("..")) + "..";
                 } else {
                     dispName = itemDisplayName;
                 }
@@ -268,29 +277,28 @@ public class GatherHud {
                         : "x" + totalCount + "  in " + chestCount + " chest" + (chestCount == 1 ? "" : "s");
 
                 int iconW  = finderItem != null ? 20 : 0;
-                int textW  = Math.max(client.textRenderer.getWidth(dispName),
-                             Math.max(client.textRenderer.getWidth(navLine),
-                                      client.textRenderer.getWidth(cntLine)));
+                int textW  = Math.max(minecraft.font.width(dispName),
+                             Math.max(minecraft.font.width(navLine),
+                                      minecraft.font.width(cntLine)));
                 int panelW = Math.max(settings.layoutFinderW, iconW + textW + 12);
                 int panelX = settings.layoutFinderX < 0 ? sw - 4 - panelW : settings.layoutFinderX;
                 int panelY = settings.layoutFinderY;
                 int panelH = 38;
 
-                context.fill(panelX, panelY, panelX + panelW, panelY + panelH, 0xCC1A0000);
-                context.fill(panelX, panelY, panelX + panelW, panelY + 1, 0xFFFF4444);
+                GatherTheme.drawNineSlice(context, GatherTheme.HUD_FINDER_PANEL, panelX, panelY, panelW, panelH);
 
                 int tx = panelX + 4;
                 if (finderItem != null) {
-                    context.drawItem(finderItem.getDefaultStack(), panelX + 2, panelY + 3);
+                    context.item(finderItem.getDefaultInstance(), panelX + 2, panelY + 3);
                     tx = panelX + 22;
                 }
-                context.drawTextWithShadow(client.textRenderer, Text.literal(dispName), tx, panelY + 4,  0xFFFF9999);
-                context.drawTextWithShadow(client.textRenderer, Text.literal(cntLine),  tx, panelY + 15, chestCount == 0 ? 0xFF554433 : 0xFFAA7744);
-                context.drawTextWithShadow(client.textRenderer, Text.literal(navLine),  tx, panelY + 26, nearest == null ? 0xFF664433 : 0xFFFF5533);
+                context.text(minecraft.font, Component.literal(dispName), tx, panelY + 4,  0xFFFF9999);
+                context.text(minecraft.font, Component.literal(cntLine),  tx, panelY + 15, chestCount == 0 ? 0xFF554433 : 0xFFAA7744);
+                context.text(minecraft.font, Component.literal(navLine),  tx, panelY + 26, nearest == null ? 0xFF664433 : 0xFFFF5533);
 
                 // Orbiting chevron near crosshair
                 if (!Double.isNaN(relativeAngle)) {
-                    int sh = client.getWindow().getScaledHeight();
+                    int sh = minecraft.getWindow().getGuiScaledHeight();
                     float cx = sw / 2.0f, cy = sh / 2.0f;
                     float radius = 20f;
                     double relRad = Math.toRadians(relativeAngle);
@@ -299,20 +307,20 @@ public class GatherHud {
                     float pulse = 0.65f + 0.35f * (float)Math.sin(now / 350.0);
                     int alpha = (int)(pulse * 255) << 24;
                     int chevColor = (alpha & 0xFF000000) | 0x00FF6644;
-                    var mat = context.getMatrices();
+                    var mat = context.pose();
                     mat.pushMatrix();
                     mat.translate(ax, ay);
                     mat.rotate((float)Math.toRadians(relativeAngle - 90));
-                    int tw = client.textRenderer.getWidth(">");
-                    context.drawTextWithShadow(client.textRenderer, Text.literal(">"), -tw / 2, -4, chevColor);
+                    int tw = minecraft.font.width(">");
+                    context.text(minecraft.font, Component.literal(">"), -tw / 2, -4, chevColor);
                     mat.popMatrix();
                     // Distance label further out along same direction, in screen space
                     float labelRadius = radius + 14f;
                     float lx2 = cx + (float)(Math.sin(relRad) * labelRadius);
                     float ly2 = cy - (float)(Math.cos(relRad) * labelRadius);
                     int distLabelColor = (alpha & 0xFF000000) | 0x00BBCCDD;
-                    int dw = client.textRenderer.getWidth(distStr);
-                    context.drawTextWithShadow(client.textRenderer, Text.literal(distStr),
+                    int dw = minecraft.font.width(distStr);
+                    context.text(minecraft.font, Component.literal(distStr),
                             (int)lx2 - dw / 2, (int)ly2 - 4, distLabelColor);
                 }
             }
@@ -321,7 +329,7 @@ public class GatherHud {
         // === COMPLETION TOASTS ===
         toastQueue.removeIf(t -> now - t.startMs() > TOAST_TOTAL_MS);
         if (!toastQueue.isEmpty()) {
-            int sw2 = client.getWindow().getScaledWidth();
+            int sw2 = minecraft.getWindow().getGuiScaledWidth();
             int toastCenterX = settings.layoutToastX < 0 ? sw2 / 2 : settings.layoutToastX + 100;
             for (int ti = toastQueue.size() - 1; ti >= 0; ti--) {
                 ToastEntry toast = toastQueue.get(ti);
@@ -333,14 +341,12 @@ public class GatherHud {
                 alpha = Math.max(0f, Math.min(1f, alpha));
                 int a = (int)(alpha * 255);
                 String msg = "✔ " + toast.itemName();
-                int tw2 = client.textRenderer.getWidth(msg);
+                int tw2 = minecraft.font.width(msg);
                 int pw = tw2 + 18;
                 int px = toastCenterX - pw / 2;
                 int py = settings.layoutToastY + (toastQueue.size() - 1 - ti) * 18;
-                context.fill(px, py, px + pw, py + 14, (a << 24) | 0x001A00);
-                context.fill(px, py, px + pw, py + 1, (a << 24) | 0x33CC66);
-                context.fill(px, py + 13, px + pw, py + 14, (a << 24) | 0x1A6633);
-                context.drawTextWithShadow(client.textRenderer, Text.literal(msg), px + 9, py + 3, (a << 24) | 0xAAFFCC);
+                GatherTheme.drawNineSliceTint(context, GatherTheme.HUD_TOAST_PANEL, px, py, pw, 14, (a << 24) | 0xFFFFFF);
+                context.text(minecraft.font, Component.literal(msg), px + 9, py + 3, (a << 24) | 0xAAFFCC);
             }
         }
 
@@ -366,8 +372,8 @@ public class GatherHud {
             }
 
             if (entry.header()) {
-                context.drawTextWithShadow(client.textRenderer,
-                        Text.literal("§7" + lists.get(entry.listIndex()).name), x + 2, y + 2, 0xFF778899);
+                context.text(minecraft.font,
+                        Component.literal("§7" + lists.get(entry.listIndex()).name), x + 2, y + 2, 0xFF778899);
                 y += LABEL_H;
                 continue;
             }
@@ -380,8 +386,9 @@ public class GatherHud {
             int needed    = root.needed();
             boolean ready = root.ready();
 
-            context.fill(x, y, x + 80, y + ROW_H_GOAL - 2, ready ? 0xAA002200 : 0xAA00001A);
-            context.drawItem(stack, x + 1, y + 2);
+            GatherTheme.drawNineSlice(context, ready ? GatherTheme.HUD_GOAL_ROW_READY : GatherTheme.HUD_GOAL_ROW,
+                    x, y, 80, ROW_H_GOAL - 2);
+            context.item(stack, x + 1, y + 2);
 
             String haveBadge;
             int haveBadgeCol;
@@ -392,37 +399,37 @@ public class GatherHud {
                 haveBadge = have + "/" + needed;
                 haveBadgeCol = have >= needed ? 0xFF88FF88 : (have > 0 ? 0xFFFFFF55 : 0xFFFF6666);
             }
-            int haveBadgeW = client.textRenderer.getWidth(haveBadge);
-            context.drawTextWithShadow(client.textRenderer,
-                    Text.literal(haveBadge), x + 78 - haveBadgeW, y + 2, haveBadgeCol);
+            int haveBadgeW = minecraft.font.width(haveBadge);
+            context.text(minecraft.font,
+                    Component.literal(haveBadge), x + 78 - haveBadgeW, y + 2, haveBadgeCol);
 
             int nameMaxW = 78 - 19 - haveBadgeW - 3;
             String fullName = entry.itemName();
             String name;
-            if (client.textRenderer.getWidth(fullName) > nameMaxW) {
-                name = client.textRenderer.trimToWidth(fullName,
-                        nameMaxW - client.textRenderer.getWidth("...")) + "...";
+            if (minecraft.font.width(fullName) > nameMaxW) {
+                name = minecraft.font.plainSubstrByWidth(fullName,
+                        nameMaxW - minecraft.font.width("...")) + "...";
             } else {
                 name = fullName;
             }
-            context.drawTextWithShadow(client.textRenderer,
-                    Text.literal(name), x + 19, y + 2, ready ? 0xFFEEFFEE : 0xFFCCCCCC);
+            context.text(minecraft.font,
+                    Component.literal(name), x + 19, y + 2, ready ? 0xFFEEFFEE : 0xFFCCCCCC);
 
             if (root.craftableNow() >= 0) {
                 int cnt = root.craftableNow();
                 String craftLabel = "craft: " + cnt;
                 int craftCol = cnt >= needed ? 0xFF55FF55 : (cnt > 0 ? 0xFFFFDD33 : 0xFF666666);
-                int craftW = client.textRenderer.getWidth(craftLabel);
-                context.drawTextWithShadow(client.textRenderer,
-                        Text.literal(craftLabel), x + 78 - craftW, y + 11, craftCol);
+                int craftW = minecraft.font.width(craftLabel);
+                context.text(minecraft.font,
+                        Component.literal(craftLabel), x + 78 - craftW, y + 11, craftCol);
             }
 
             float prog = root.leafProgress();
             int lineW = (int)(80 * prog);
             int barCol = prog >= 1f ? 0x44DD66 : (prog > 0.5f ? 0xFFDD33 : (prog > 0f ? 0xFF8833 : 0x664444));
-            context.fill(x, y + ROW_H_GOAL - 2, x + 80, y + ROW_H_GOAL - 1, 0x33000000);
+            GatherTheme.drawStretch(context, GatherTheme.HUD_PROGRESS_TRACK, x, y + ROW_H_GOAL - 2, 80, 1);
             if (lineW > 0)
-                context.fill(x, y + ROW_H_GOAL - 2, x + lineW, y + ROW_H_GOAL - 1, 0xFF000000 | barCol);
+                GatherTheme.drawStretch(context, progressFillTexture(prog), x, y + ROW_H_GOAL - 2, lineW, 1);
 
             y += ROW_H_GOAL;
         }
@@ -430,14 +437,14 @@ public class GatherHud {
             int ox = Math.max(0, settings.layoutGoalsX) + (goalCols - 1) * colW;
             int oy = topY + maxContentH - 11;
             String more = "+" + hiddenGoalRows + " more";
-            context.fill(ox, oy, ox + 80, oy + 10, 0xAA111122);
-            context.drawTextWithShadow(client.textRenderer, Text.literal(more), ox + 2, oy + 1, 0xFFFFAA44);
+            GatherTheme.drawNineSlice(context, GatherTheme.HUD_MORE_ROW, ox, oy, 80, 10);
+            context.text(minecraft.font, Component.literal(more), ox + 2, oy + 1, 0xFFFFAA44);
         }
 
         // === RENDER BASE MATERIAL ROWS (multi-column) ===
         if (!matEntries.isEmpty()) {
-            context.drawTextWithShadow(client.textRenderer,
-                    Text.literal("§7base materials"), matStartX + 2, matTopY + 2, 0xFF778899);
+            context.text(minecraft.font,
+                    Component.literal("§7base materials"), matStartX + 2, matTopY + 2, 0xFF778899);
         }
         for (int mi = 0; mi < matEntries.size(); mi++) {
             int col = numCols > 0 ? mi / matRowsPerCol : 0;
@@ -455,50 +462,57 @@ public class GatherHud {
             int rx   = matStartX + col * matColW + materialXShift(entry, now);
             int ry   = matRowStartY + row * ROW_H_MAT;
 
-            context.fill(rx + 77, ry, rx + 80, ry + ROW_H_MAT - 2, (a << 24) | 0xBB7722);
+            GatherTheme.drawStretchTint(context, GatherTheme.HUD_MATERIAL_ACCENT,
+                    rx + 77, ry, 3, ROW_H_MAT - 2, (a << 24) | 0xFFFFFF);
 
             if (completing) {
                 float pulse = (float)(0.5 + 0.5 * Math.sin(now * 0.020));
                 int bgG = (int)(0x33 + pulse * 0x55);
-                context.fill(rx, ry, rx + 80, ry + ROW_H_MAT - 2, (a << 24) | (bgG << 8));
-                context.drawItem(stack, rx + 1, ry);
-                context.drawTextWithShadow(client.textRenderer,
-                        Text.literal(need + "/" + need), rx + 19, ry + 4, (a << 24) | 0x55FF55);
-                context.fill(rx, ry + ROW_H_MAT - 2, rx + 80, ry + ROW_H_MAT - 1, (a / 4 << 24) | 0x000000);
-                context.fill(rx, ry + ROW_H_MAT - 2, rx + 80, ry + ROW_H_MAT - 1, (a << 24) | 0x44EE66);
+                GatherTheme.drawNineSliceTint(context, GatherTheme.HUD_TINT_ROW,
+                        rx, ry, 80, ROW_H_MAT - 2, (a << 24) | (bgG << 8));
+                context.item(stack, rx + 1, ry);
+                context.text(minecraft.font,
+                        Component.literal(need + "/" + need), rx + 19, ry + 4, (a << 24) | 0x55FF55);
+                GatherTheme.drawStretchTint(context, GatherTheme.HUD_PROGRESS_BLACK,
+                        rx, ry + ROW_H_MAT - 2, 80, 1, (a / 4 << 24) | 0xFFFFFF);
+                GatherTheme.drawStretchTint(context, GatherTheme.HUD_PROGRESS_FILL_COMPLETE,
+                        rx, ry + ROW_H_MAT - 2, 80, 1, (a << 24) | 0xFFFFFF);
             } else {
                 float progress = need > 0 ? Math.min(1f, (float) have / need) : 1f;
                 int bgBase  = have >= need ? 0x00AA44 : 0x220033;
                 int bgAlpha = (int)(alpha * 0x88);
-                context.fill(rx, ry, rx + 80, ry + ROW_H_MAT - 2, (bgAlpha << 24) | bgBase);
-                context.drawItem(stack, rx + 1, ry);
+                GatherTheme.drawNineSliceTint(context, GatherTheme.HUD_TINT_ROW,
+                        rx, ry, 80, ROW_H_MAT - 2, (bgAlpha << 24) | bgBase);
+                context.item(stack, rx + 1, ry);
                 if (alpha < 1f) {
                     int maskA = (int)((1f - alpha) * 230);
-                    context.fill(rx + 1, ry, rx + 17, ry + 16, maskA << 24);
+                    GatherTheme.drawTint(context, GatherTheme.HUD_ITEM_FADE_MASK, rx + 1, ry, maskA << 24);
                 }
                 int rawCol = have >= need ? 0x88FF88 : (have > 0 ? 0xFFFF55 : 0xFF6666);
-                context.drawTextWithShadow(client.textRenderer,
-                        Text.literal(have + "/" + need), rx + 19, ry + 4, (a << 24) | (rawCol & 0xFFFFFF));
+                context.text(minecraft.font,
+                        Component.literal(have + "/" + need), rx + 19, ry + 4, (a << 24) | (rawCol & 0xFFFFFF));
                 int lineW      = (int)(80 * progress);
                 int rawLineCol = progress >= 1f ? 0x44DD66 : (progress > 0 ? 0xFFDD33 : 0x664444);
                 int lineAlpha  = (int)(alpha * 0xFF);
-                context.fill(rx, ry + ROW_H_MAT - 2, rx + 80, ry + ROW_H_MAT - 1, (lineAlpha / 4 << 24) | 0x000000);
+                GatherTheme.drawStretchTint(context, GatherTheme.HUD_PROGRESS_BLACK,
+                        rx, ry + ROW_H_MAT - 2, 80, 1, (lineAlpha / 4 << 24) | 0xFFFFFF);
                 if (lineW > 0)
-                    context.fill(rx, ry + ROW_H_MAT - 2, rx + lineW, ry + ROW_H_MAT - 1, (lineAlpha << 24) | rawLineCol);
+                    GatherTheme.drawStretchTint(context, progressFillTexture(progress),
+                            rx, ry + ROW_H_MAT - 2, lineW, 1, (lineAlpha << 24) | 0xFFFFFF);
             }
         }
         // === RENDER CRAFT HINTS ===
         if (!hints.isEmpty()) {
-            context.drawTextWithShadow(client.textRenderer,
-                    Text.literal("§acraft ready"), hintStartX + 2, hintTopY + 2, 0xFF66CC66);
+            context.text(minecraft.font,
+                    Component.literal("§acraft ready"), hintStartX + 2, hintTopY + 2, 0xFF66CC66);
 
-            int arrowW = client.textRenderer.getWidth("->");
+            int arrowW = minecraft.font.width("->");
             // Pre-pass: find max row width so all rows share same width
             int maxRowW = 40;
             for (HintEntry hint : hints) {
                 int lc = hint.leafStacks().size();
                 int leafEnd = 1 + lc * 16 - Math.max(0, lc - 1);
-                int cntW = client.textRenderer.getWidth("x" + hint.craftable());
+                int cntW = minecraft.font.width("x" + hint.craftable());
                 int rw = leafEnd + 2 + arrowW + 2 + 16 + 2 + cntW + 3;
                 if (rw > maxRowW) maxRowW = rw;
             }
@@ -516,7 +530,8 @@ public class GatherHud {
 
                 float pulse = (float)(0.5 + 0.5 * Math.sin(now * 0.003));
                 int bgG = (int)(0x22 + pulse * 0x33);
-                context.fill(x, y, x + maxRowW, y + ROW_H_HINT - 2, (0xAA << 24) | (bgG << 8));
+                GatherTheme.drawNineSliceTint(context, GatherTheme.HUD_TINT_ROW,
+                        x, y, maxRowW, ROW_H_HINT - 2, (0xAA << 24) | (bgG << 8));
 
                 // Up to 2 leaf icons on the left
                 List<ItemStack> leafStacks = hint.leafStacks();
@@ -524,42 +539,49 @@ public class GatherHud {
                 int iconX = x + 1;
                 for (int li = 0; li < lc; li++) {
                     ItemStack leafStack = leafStacks.get(li);
-                    if (!leafStack.isEmpty()) context.drawItem(leafStack, iconX, y + 2);
+                    if (!leafStack.isEmpty()) context.item(leafStack, iconX, y + 2);
                     iconX += 15;
                 }
                 int leafEnd = x + 1 + lc * 16 - Math.max(0, lc - 1);
 
                 // Arrow — tight against last leaf icon
                 int arrowX = leafEnd + 2;
-                context.drawTextWithShadow(client.textRenderer,
-                        Text.literal("->"), arrowX, y + 6, 0xFF88CC88);
+                context.text(minecraft.font,
+                        Component.literal("->"), arrowX, y + 6, 0xFF88CC88);
 
                 // Root item icon + count
                 int rootX = arrowX + arrowW + 2;
-                context.drawItem(rootStack, rootX, y + 2);
+                context.item(rootStack, rootX, y + 2);
                 String cnt = "x" + hint.craftable();
-                context.drawTextWithShadow(client.textRenderer,
-                        Text.literal(cnt), rootX + 17, y + 6, 0xFF88FF88);
+                context.text(minecraft.font,
+                        Component.literal(cnt), rootX + 17, y + 6, 0xFF88FF88);
             }
         }
     }
 
-    private static HudModel getHudModel(MinecraftClient client, GatherState state, long now) {
+    private static HudModel getHudModel(Minecraft minecraft, GatherState state, long now) {
         if (!modelDirty && now - cachedModelAtMs < HUD_MODEL_REFRESH_MS) {
             return cachedModel;
         }
-        cachedModel = buildHudModel(client, state, now);
+        cachedModel = buildHudModel(minecraft, state, now);
         cachedModelAtMs = now;
         modelDirty = false;
         return cachedModel;
     }
 
-    private static HudModel buildHudModel(MinecraftClient client, GatherState state, long now) {
+    private static GatherTheme.Texture progressFillTexture(float progress) {
+        if (progress >= 1f) return GatherTheme.HUD_PROGRESS_FILL_COMPLETE;
+        if (progress > 0.5f) return GatherTheme.HUD_PROGRESS_FILL_PARTIAL;
+        if (progress > 0f) return GatherTheme.HUD_PROGRESS_FILL_LOW;
+        return GatherTheme.HUD_PROGRESS_FILL_EMPTY;
+    }
+
+    private static HudModel buildHudModel(Minecraft minecraft, GatherState state, long now) {
         List<GatherList> lists = new ArrayList<>(state.getLists());
         boolean countChests = GatherSettings.get().countChests;
         java.util.function.Function<String, Integer> totalCounter = id -> {
-            Item it = Registries.ITEM.get(Identifier.of(id));
-            int inInv = it == null ? 0 : countInventoryTagAware(client, it);
+            Item it = BuiltInRegistries.ITEM.getValue(Identifier.parse(id));
+            int inInv = it == null ? 0 : countInventoryTagAware(minecraft, it);
             int inChests = countChests ? state.getTrackedChestCountMatching(id) : 0;
             int inManual = countChests ? 0 : state.getManualChestCountMatching(id);
             int inCollectors = state.getCollectorChestCountMatching(id);
@@ -584,11 +606,11 @@ public class GatherHud {
                 for (String key : currentReadyBuf) {
                     if (!knownReadyGoals.contains(key)) {
                         String itemId = key.substring(key.indexOf(':') + 1);
-                        Item completedItem = ITEM_ID_CACHE.computeIfAbsent(itemId, k -> Registries.ITEM.get(Identifier.of(k)));
-                        String itemName = completedItem != null ? completedItem.getName().getString() : itemId;
+                        Item completedItem = ITEM_ID_CACHE.computeIfAbsent(itemId, k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
+                        String itemName = completedItem != null ? com.gather.client.GatherUi.itemName(completedItem).getString() : itemId;
                         if (toastQueue.size() < MAX_TOASTS) toastQueue.add(new ToastEntry(itemName, now));
-                        client.getSoundManager().play(
-                            PositionedSoundInstance.ui(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 1.2f));
+                        minecraft.getSoundManager().play(
+                            SimpleSoundInstance.forUI(SoundEvents.EXPERIENCE_ORB_PICKUP, 1.2f));
                     }
                 }
             } else {
@@ -604,6 +626,7 @@ public class GatherHud {
             state.getScaledIngredientLeaves(li, totalCounter)
                     .forEach((id, n) -> aggRaw.merge(id, n, Integer::sum));
         }
+        animMats.keySet().removeIf(state::isBaseMaterialHidden);
 
         for (Map.Entry<String, Integer> e : aggRaw.entrySet()) {
             String id = e.getKey();
@@ -635,8 +658,8 @@ public class GatherHud {
             String id = e.getKey();
             long[] ae = e.getValue();
             if (ae[3] != 0 && now - ae[3] >= FLASH_MS) continue;
-            Item matItem = ITEM_ID_CACHE.computeIfAbsent(id, k -> Registries.ITEM.get(Identifier.of(k)));
-            ItemStack matStack = matItem != null ? matItem.getDefaultStack() : ItemStack.EMPTY;
+            Item matItem = ITEM_ID_CACHE.computeIfAbsent(id, k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
+            ItemStack matStack = matItem != null ? matItem.getDefaultInstance() : ItemStack.EMPTY;
             matEntries.add(new MatEntry(id, matStack, (int) ae[2], totalCounter.apply(id), ae[0], ae[3]));
         }
 
@@ -645,14 +668,14 @@ public class GatherHud {
             if (lists.get(li).hudHidden) continue;
             for (GatherState.RootInfo root : rootsPerList.get(li)) {
                 if (!root.ready() && root.craftableNow() > 0) {
-                    Item rootItem = ITEM_ID_CACHE.computeIfAbsent(root.itemId(), k -> Registries.ITEM.get(Identifier.of(k)));
-                    ItemStack rootStack = rootItem != null ? rootItem.getDefaultStack() : ItemStack.EMPTY;
+                    Item rootItem = ITEM_ID_CACHE.computeIfAbsent(root.itemId(), k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
+                    ItemStack rootStack = rootItem != null ? rootItem.getDefaultInstance() : ItemStack.EMPTY;
                     List<String> leafIds = state.getLeafIdsForRoot(li, root.itemId());
                     int leafCount = Math.min(2, leafIds.size());
                     List<ItemStack> leafStacks = new ArrayList<>(leafCount);
                     for (int k = 0; k < leafCount; k++) {
-                        Item leafItem = ITEM_ID_CACHE.computeIfAbsent(leafIds.get(k), id -> Registries.ITEM.get(Identifier.of(id)));
-                        leafStacks.add(leafItem != null ? leafItem.getDefaultStack() : ItemStack.EMPTY);
+                        Item leafItem = ITEM_ID_CACHE.computeIfAbsent(leafIds.get(k), id -> BuiltInRegistries.ITEM.getValue(Identifier.parse(id)));
+                        leafStacks.add(leafItem != null ? leafItem.getDefaultInstance() : ItemStack.EMPTY);
                     }
                     hints.add(new HintEntry(root.itemId(), rootStack, root.craftableNow(), root.needed(), leafStacks));
                 }
@@ -665,9 +688,9 @@ public class GatherHud {
             if (!rootsPerList.get(li).isEmpty()) {
                 goalEntries.add(new GoalEntry(li, null, ItemStack.EMPTY, "", true));
                 for (GatherState.RootInfo root : rootsPerList.get(li)) {
-                    Item goalItem = ITEM_ID_CACHE.computeIfAbsent(root.itemId(), k -> Registries.ITEM.get(Identifier.of(k)));
-                    ItemStack goalStack = goalItem != null ? goalItem.getDefaultStack() : ItemStack.EMPTY;
-                    String goalName = goalItem != null ? goalItem.getName().getString() : root.itemId();
+                    Item goalItem = ITEM_ID_CACHE.computeIfAbsent(root.itemId(), k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
+                    ItemStack goalStack = goalItem != null ? goalItem.getDefaultInstance() : ItemStack.EMPTY;
+                    String goalName = goalItem != null ? com.gather.client.GatherUi.itemName(goalItem).getString() : root.itemId();
                     goalEntries.add(new GoalEntry(li, root, goalStack, goalName, false));
                 }
             }
@@ -695,29 +718,29 @@ public class GatherHud {
         return (int) (Math.max(0f, Math.min(1f, t)) * 60);
     }
 
-    public static int countInventoryTagAware(MinecraftClient client, Item item) {
-        if (client.player == null) return 0;
-        String itemId = Registries.ITEM.getId(item).toString();
+    public static int countInventoryTagAware(Minecraft minecraft, Item item) {
+        if (minecraft.player == null) return 0;
+        String itemId = BuiltInRegistries.ITEM.getKey(item).toString();
         long now = System.currentTimeMillis();
         InventoryCountEntry cached = inventoryCountCache.get(itemId);
         if (cached != null && now < cached.expiresAtMs()) return cached.count();
-        InventorySnapshot snapshot = inventorySnapshot(client, now);
+        InventorySnapshot snapshot = inventorySnapshot(minecraft, now);
 
         Set<TagKey<Item>> typeTags = ITEM_TAG_CACHE.computeIfAbsent(item, it -> {
-            String path = Registries.ITEM.getId(it).getPath();
+            String path = BuiltInRegistries.ITEM.getKey(it).getPath();
             Set<String> expectedPaths = expectedTagPaths(path);
-            return it.getRegistryEntry().streamTags()
-                    .filter(tag -> expectedPaths.contains(tag.id().getPath()))
+            return it.builtInRegistryHolder().tags()
+                    .filter(tag -> expectedPaths.contains(tag.location().getPath()))
                     .collect(Collectors.toSet());
         });
 
         int count = 0;
         for (Map.Entry<Item, Integer> entry : snapshot.counts().entrySet()) {
             Item inv = entry.getKey();
-            String invId = Registries.ITEM.getId(inv).toString();
+            String invId = BuiltInRegistries.ITEM.getKey(inv).toString();
             if (inv == item
                     || GatherState.isSameWoodFamily(itemId, invId)
-                    || (!typeTags.isEmpty() && inv.getRegistryEntry().streamTags().anyMatch(typeTags::contains))) {
+                    || (!typeTags.isEmpty() && inv.builtInRegistryHolder().tags().anyMatch(typeTags::contains))) {
                 count += entry.getValue();
             }
         }
@@ -725,17 +748,17 @@ public class GatherHud {
         return count;
     }
 
-    private static InventorySnapshot inventorySnapshot(MinecraftClient client, long now) {
+    private static InventorySnapshot inventorySnapshot(Minecraft minecraft, long now) {
         if (inventorySnapshot != null && now < inventorySnapshot.expiresAtMs()) return inventorySnapshot;
         Map<Item, Integer> counts = new HashMap<>();
-        for (int i = 0; i < client.player.getInventory().size(); i++) {
-            var stack = client.player.getInventory().getStack(i);
+        for (int i = 0; i < minecraft.player.getInventory().getContainerSize(); i++) {
+            var stack = minecraft.player.getInventory().getItem(i);
             if (stack.isEmpty()) continue;
             counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
             if (stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
-                var container = stack.get(DataComponentTypes.CONTAINER);
+                var container = stack.get(DataComponents.CONTAINER);
                 if (container == null) continue;
-                for (var inner : container.iterateNonEmpty()) {
+                for (var inner : container.nonEmptyItemCopyStream().toList()) {
                     if (!inner.isEmpty()) counts.merge(inner.getItem(), inner.getCount(), Integer::sum);
                 }
             }

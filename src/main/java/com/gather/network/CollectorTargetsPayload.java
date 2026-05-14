@@ -1,33 +1,33 @@
 package com.gather.network;
 
 import com.gather.GatherMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public record CollectorTargetsPayload(List<String> neededItemIds) implements CustomPayload {
+public record CollectorTargetsPayload(List<String> neededItemIds) implements CustomPacketPayload {
 
-    public static final Id<CollectorTargetsPayload> ID =
-            new Id<>(Identifier.of(GatherMod.MOD_ID, "collector_targets"));
+    public static final CustomPacketPayload.Type<CollectorTargetsPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(GatherMod.MOD_ID, "collector_targets"));
 
-    public static final PacketCodec<RegistryByteBuf, CollectorTargetsPayload> CODEC =
-            PacketCodec.of(
-                    (v, buf) -> {
+    public static final StreamCodec<RegistryFriendlyByteBuf, CollectorTargetsPayload> CODEC =
+            StreamCodec.of(
+                    (buf, v) -> {
                         buf.writeInt(v.neededItemIds().size());
-                        for (String id : v.neededItemIds()) buf.writeString(id);
+                        for (String id : v.neededItemIds()) buf.writeUtf(id);
                     },
                     buf -> {
                         int size = buf.readInt();
                         List<String> ids = new ArrayList<>(size);
-                        for (int i = 0; i < size; i++) ids.add(buf.readString());
+                        for (int i = 0; i < size; i++) ids.add(buf.readUtf());
                         return new CollectorTargetsPayload(ids);
                     }
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() { return ID; }
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return ID; }
 }

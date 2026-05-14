@@ -2,7 +2,7 @@ package com.gather;
 
 import com.google.gson.Gson;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.util.WorldSavePath;
+import net.minecraft.world.level.storage.LevelResource;
 
 import java.io.Reader;
 import java.io.Writer;
@@ -22,7 +22,7 @@ public class GatherServerConfig {
     public static boolean isXrayAllowed() { return xrayAllowed; }
 
     public static void load(MinecraftServer server) {
-        configPath = server.getSavePath(WorldSavePath.ROOT).resolve("gather_server.json");
+        configPath = server.getWorldPath(LevelResource.ROOT).resolve("gather_server.json");
         if (Files.exists(configPath)) {
             try (Reader r = Files.newBufferedReader(configPath)) {
                 Data d = GSON.fromJson(r, Data.class);

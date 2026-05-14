@@ -1,25 +1,25 @@
 package com.gather.network;
 
 import com.gather.GatherMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public record CollectorStatePayload(boolean enabled, boolean allMode, List<String> selectedItemIds, boolean leaveOne) implements CustomPayload {
-    public static final Id<CollectorStatePayload> ID =
-            new Id<>(Identifier.of(GatherMod.MOD_ID, "collector_state"));
+public record CollectorStatePayload(boolean enabled, boolean allMode, List<String> selectedItemIds, boolean leaveOne) implements CustomPacketPayload {
+    public static final CustomPacketPayload.Type<CollectorStatePayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(GatherMod.MOD_ID, "collector_state"));
 
-    public static final PacketCodec<RegistryByteBuf, CollectorStatePayload> CODEC =
-            PacketCodec.of(
-                    (v, buf) -> {
+    public static final StreamCodec<RegistryFriendlyByteBuf, CollectorStatePayload> CODEC =
+            StreamCodec.of(
+                    (buf, v) -> {
                         buf.writeBoolean(v.enabled());
                         buf.writeBoolean(v.allMode());
                         buf.writeInt(v.selectedItemIds().size());
-                        for (String id : v.selectedItemIds()) buf.writeString(id);
+                        for (String id : v.selectedItemIds()) buf.writeUtf(id);
                         buf.writeBoolean(v.leaveOne());
                     },
                     buf -> {
@@ -27,12 +27,12 @@ public record CollectorStatePayload(boolean enabled, boolean allMode, List<Strin
                         boolean allMode = buf.readBoolean();
                         int size = buf.readInt();
                         List<String> ids = new ArrayList<>(size);
-                        for (int i = 0; i < size; i++) ids.add(buf.readString());
+                        for (int i = 0; i < size; i++) ids.add(buf.readUtf());
                         boolean leaveOne = buf.readBoolean();
                         return new CollectorStatePayload(enabled, allMode, ids, leaveOne);
                     }
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() { return ID; }
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return ID; }
 }

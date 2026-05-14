@@ -1,15 +1,16 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherList;
 import com.gather.client.GatherState;
 import com.gather.client.GatherUi;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.text.Text;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
 
 import java.io.Reader;
 import java.io.Writer;
@@ -49,7 +50,7 @@ public class GatherTransferScreen extends Screen {
     private long statusExpiresAtMs = 0L;
 
     public GatherTransferScreen(Screen parent) {
-        super(Text.literal("Imports/Exports"));
+        super(Component.literal("Imports/Exports"));
         this.parent = parent;
         for (String wid : GatherState.listOtherWorldIds()) {
             List<GatherList> lists = GatherState.loadListsFromWorld(wid);
@@ -69,16 +70,16 @@ public class GatherTransferScreen extends Screen {
     }
 
     @Override
-    public void render(DrawContext ctx, int mx, int my, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor ctx, int mx, int my, float delta) {
         clearExpiredStatus();
-        ctx.fill(0, 0, width, height, 0xCC111122);
-        ctx.drawCenteredTextWithShadow(textRenderer, title, width / 2, 10, 0xFFCCDDFF);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
+        ctx.centeredText(font, title, width / 2, 10, 0xFFCCDDFF);
         String subtitle = switch (mode) {
             case MODE_EXPORT -> "Choose a current-world list to export as JSON";
             case MODE_JSON_IMPORT -> "Copy a Gather list JSON into the exchange folder, then import it here";
             default -> "Import goal lists from other worlds into this world";
         };
-        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(subtitle), width / 2, 22, 0xFF445566);
+        ctx.centeredText(font, Component.literal(subtitle), width / 2, 22, 0xFF445566);
 
         int menuX = menuLeft();
         int menuW = menuWidth();
@@ -98,28 +99,28 @@ public class GatherTransferScreen extends Screen {
         if (totalContentH > visH) {
             int thumbH = Math.max(14, visH * visH / totalContentH);
             int thumbY = CONTENT_TOP + (int)((long)(visH - thumbH) * scrollY / (totalContentH - visH));
-            ctx.fill(menuR - 3, CONTENT_TOP, menuR - 1, contentBottom, 0x22FFFFFF);
-            ctx.fill(menuR - 3, thumbY, menuR - 1, thumbY + thumbH, 0x88AACCFF);
+            GatherTheme.fill(ctx, menuR - 3, CONTENT_TOP, menuR - 1, contentBottom, 0x22FFFFFF);
+            GatherTheme.fill(ctx, menuR - 3, thumbY, menuR - 1, thumbY + thumbH, 0x88AACCFF);
         }
 
         if (GatherState.get().getListCount() >= 10 && statusLine.isEmpty())
-            ctx.drawCenteredTextWithShadow(textRenderer,
-                    Text.literal("List cap reached (10 max) - delete a list first"),
+            ctx.centeredText(font,
+                    Component.literal("List cap reached (10 max) - delete a list first"),
                     width / 2, contentBottom + 6, 0xFFFF6666);
 
         if (!statusLine.isEmpty()) {
-            ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(statusLine), width / 2, contentBottom + 6, 0xFF88CCFF);
+            ctx.centeredText(font, Component.literal(statusLine), width / 2, contentBottom + 6, 0xFF88CCFF);
         }
 
         renderBottomButtons(ctx, mx, my);
 
-        super.render(ctx, mx, my, delta);
+        super.extractRenderState(ctx, mx, my, delta);
     }
 
-    private void renderWorldImportRows(DrawContext ctx, int mx, int my, int y) {
+    private void renderWorldImportRows(GuiGraphicsExtractor ctx, int mx, int my, int y) {
         if (worlds.isEmpty()) {
-            ctx.drawCenteredTextWithShadow(textRenderer,
-                    Text.literal("No other worlds with saved lists found."),
+            ctx.centeredText(font,
+                    Component.literal("No other worlds with saved lists found."),
                     width / 2, height / 2, 0xFF778899);
             return;
         }
@@ -134,7 +135,7 @@ public class GatherTransferScreen extends Screen {
         }
     }
 
-    private void renderExportRows(DrawContext ctx, int mx, int my, int y) {
+    private void renderExportRows(GuiGraphicsExtractor ctx, int mx, int my, int y) {
         List<GatherList> lists = GatherState.get().getLists();
         for (int li = 0; li < lists.size(); li++) {
             renderCurrentListRow(ctx, mx, my, lists.get(li), li, y);
@@ -142,10 +143,10 @@ public class GatherTransferScreen extends Screen {
         }
     }
 
-    private void renderJsonImportRows(DrawContext ctx, int mx, int my, int y) {
+    private void renderJsonImportRows(GuiGraphicsExtractor ctx, int mx, int my, int y) {
         if (jsonImports.isEmpty()) {
-            ctx.drawCenteredTextWithShadow(textRenderer,
-                    Text.literal("No JSON exports found. Copy one into the exchange folder."),
+            ctx.centeredText(font,
+                    Component.literal("No JSON exports found. Copy one into the exchange folder."),
                     width / 2, height / 2, 0xFF778899);
             return;
         }
@@ -155,29 +156,29 @@ public class GatherTransferScreen extends Screen {
         }
     }
 
-    private void renderWorldRow(DrawContext ctx, int mx, int my, WorldEntry world, int y) {
+    private void renderWorldRow(GuiGraphicsExtractor ctx, int mx, int my, WorldEntry world, int y) {
         if (y + WORLD_H < CONTENT_TOP || y > contentBottom) return;
         int menuX = menuLeft();
         int menuR = menuRight();
         String tag   = world.isSp() ? "§bSP§r" : "§6MP§r";
         String label = tag + "  " + capitalize(world.displayName());
-        ctx.fill(menuX, y + 1, menuR, y + WORLD_H - 1, 0x33334466);
-        ctx.fill(menuX, y + 1, menuX + 1, y + WORLD_H - 1, 0xFF4466BB);
-        ctx.drawTextWithShadow(textRenderer, Text.literal(label), menuX + 10, y + 6, 0xFFCCDDFF);
+        GatherTheme.fill(ctx, menuX, y + 1, menuR, y + WORLD_H - 1, 0x33334466);
+        GatherTheme.fill(ctx, menuX, y + 1, menuX + 1, y + WORLD_H - 1, 0xFF4466BB);
+        ctx.text(font, Component.literal(label), menuX + 10, y + 6, 0xFFCCDDFF);
 
         // Import All button
         boolean atCap = GatherState.get().getListCount() >= 10;
         int bx = menuR - BTN_W - 6;
         boolean hov = !atCap && mx >= bx && mx <= bx + BTN_W && my >= y + 3 && my <= y + WORLD_H - 3;
-        ctx.fill(bx, y + 3, bx + BTN_W, y + WORLD_H - 3, atCap ? 0xFF1A1A2A : (hov ? 0xFF334433 : 0xFF1A2A1A));
-        ctx.fill(bx, y + 3, bx + BTN_W, y + 4, atCap ? 0xFF333344 : 0xFF449944);
+        GatherTheme.fill(ctx, bx, y + 3, bx + BTN_W, y + WORLD_H - 3, atCap ? 0xFF1A1A2A : (hov ? 0xFF334433 : 0xFF1A2A1A));
+        GatherTheme.fill(ctx, bx, y + 3, bx + BTN_W, y + 4, atCap ? 0xFF333344 : 0xFF449944);
         String importAllLabel = "Import All";
-        ctx.drawTextWithShadow(textRenderer, Text.literal(importAllLabel),
-                bx + (BTN_W - textRenderer.getWidth(importAllLabel)) / 2, y + 7,
+        ctx.text(font, Component.literal(importAllLabel),
+                bx + (BTN_W - font.width(importAllLabel)) / 2, y + 7,
                 atCap ? 0xFF555566 : 0xFFAAFFAA);
     }
 
-    private void renderListRow(DrawContext ctx, int mx, int my, WorldEntry world, int li, int y) {
+    private void renderListRow(GuiGraphicsExtractor ctx, int mx, int my, WorldEntry world, int li, int y) {
         if (y + ROW_H < CONTENT_TOP || y > contentBottom) return;
         GatherList list = world.lists().get(li);
         int roots = (int) list.nodes.stream().filter(n -> n.depth == 0).count();
@@ -189,63 +190,63 @@ public class GatherTransferScreen extends Screen {
         int menuX = menuLeft();
         int menuR = menuRight();
         int bx   = menuR - BTN_W - 6;
-        ctx.fill(menuX + 10, y + 1, bx - 8, y + ROW_H - 1, done ? 0x22004400 : 0x22001133);
+        GatherTheme.fill(ctx, menuX + 10, y + 1, bx - 8, y + ROW_H - 1, done ? 0x22004400 : 0x22001133);
         String nameText = list.name + "  §8(" + roots + " goal" + (roots == 1 ? "" : "s") + ")";
         int maxNameW = Math.max(40, bx - (menuX + 22));
-        ctx.drawTextWithShadow(textRenderer, Text.literal(truncate(nameText, maxNameW)), menuX + 12, y + 5,
+        ctx.text(font, Component.literal(truncate(nameText, maxNameW)), menuX + 12, y + 5,
                 done ? 0xFF88FF88 : 0xFFCCCCCC);
         if (done)
-            ctx.drawTextWithShadow(textRenderer, Text.literal("✔"), bx - 18, y + 5, 0xFF44FF88);
+            ctx.text(font, Component.literal("✔"), bx - 18, y + 5, 0xFF44FF88);
 
         // Import button
         boolean hov = !atCap && mx >= bx && mx <= bx + BTN_W && my >= y + 2 && my <= y + ROW_H - 2;
-        ctx.fill(bx, y + 2, bx + BTN_W, y + ROW_H - 2,
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + ROW_H - 2,
                 atCap ? 0xFF1A1A2A : (done ? 0xFF112211 : (hov ? 0xFF224433 : 0xFF113322)));
-        ctx.fill(bx, y + 2, bx + BTN_W, y + 3,
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + 3,
                 atCap ? 0xFF333344 : (done ? 0xFF337733 : 0xFF337755));
         String btnLabel = done ? "Import again" : "Import";
-        ctx.drawTextWithShadow(textRenderer, Text.literal(btnLabel),
-                bx + (BTN_W - textRenderer.getWidth(btnLabel)) / 2, y + 6,
+        ctx.text(font, Component.literal(btnLabel),
+                bx + (BTN_W - font.width(btnLabel)) / 2, y + 6,
                 atCap ? 0xFF555566 : (done ? 0xFF88CC88 : 0xFFAAFFCC));
     }
 
-    private void renderCurrentListRow(DrawContext ctx, int mx, int my, GatherList list, int li, int y) {
+    private void renderCurrentListRow(GuiGraphicsExtractor ctx, int mx, int my, GatherList list, int li, int y) {
         if (y + ROW_H < CONTENT_TOP || y > contentBottom) return;
         int roots = (int) list.nodes.stream().filter(n -> n.depth == 0).count();
         int menuX = menuLeft();
         int menuR = menuRight();
         int bx = menuR - BTN_W - 6;
-        ctx.fill(menuX + 10, y + 1, bx - 8, y + ROW_H - 1, 0x22001133);
+        GatherTheme.fill(ctx, menuX + 10, y + 1, bx - 8, y + ROW_H - 1, 0x22001133);
         String nameText = list.name + "  §8(" + roots + " goal" + (roots == 1 ? "" : "s") + ")";
-        ctx.drawTextWithShadow(textRenderer, Text.literal(truncate(nameText, Math.max(40, bx - (menuX + 22)))),
+        ctx.text(font, Component.literal(truncate(nameText, Math.max(40, bx - (menuX + 22)))),
                 menuX + 12, y + 5, 0xFFCCCCCC);
         boolean hov = mx >= bx && mx <= bx + BTN_W && my >= y + 2 && my <= y + ROW_H - 2;
-        ctx.fill(bx, y + 2, bx + BTN_W, y + ROW_H - 2, hov ? 0xFF224433 : 0xFF113322);
-        ctx.fill(bx, y + 2, bx + BTN_W, y + 3, 0xFF337755);
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + ROW_H - 2, hov ? 0xFF224433 : 0xFF113322);
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + 3, 0xFF337755);
         String btnLabel = "Export";
-        ctx.drawTextWithShadow(textRenderer, Text.literal(btnLabel),
-                bx + (BTN_W - textRenderer.getWidth(btnLabel)) / 2, y + 6, 0xFFAAFFCC);
+        ctx.text(font, Component.literal(btnLabel),
+                bx + (BTN_W - font.width(btnLabel)) / 2, y + 6, 0xFFAAFFCC);
     }
 
-    private void renderJsonRow(DrawContext ctx, int mx, int my, JsonEntry entry, int index, int y) {
+    private void renderJsonRow(GuiGraphicsExtractor ctx, int mx, int my, JsonEntry entry, int index, int y) {
         if (y + ROW_H < CONTENT_TOP || y > contentBottom) return;
         int menuX = menuLeft();
         int menuR = menuRight();
         int bx = menuR - BTN_W - 6;
-        ctx.fill(menuX + 10, y + 1, bx - 8, y + ROW_H - 1, 0x22001133);
-        ctx.drawTextWithShadow(textRenderer, Text.literal(truncate(entry.name(), Math.max(40, bx - (menuX + 22)))),
+        GatherTheme.fill(ctx, menuX + 10, y + 1, bx - 8, y + ROW_H - 1, 0x22001133);
+        ctx.text(font, Component.literal(truncate(entry.name(), Math.max(40, bx - (menuX + 22)))),
                 menuX + 12, y + 5, 0xFFCCCCCC);
         boolean atCap = GatherState.get().getListCount() >= 10;
         boolean hov = !atCap && mx >= bx && mx <= bx + BTN_W && my >= y + 2 && my <= y + ROW_H - 2;
-        ctx.fill(bx, y + 2, bx + BTN_W, y + ROW_H - 2, atCap ? 0xFF1A1A2A : (hov ? 0xFF224433 : 0xFF113322));
-        ctx.fill(bx, y + 2, bx + BTN_W, y + 3, atCap ? 0xFF333344 : 0xFF337755);
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + ROW_H - 2, atCap ? 0xFF1A1A2A : (hov ? 0xFF224433 : 0xFF113322));
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + 3, atCap ? 0xFF333344 : 0xFF337755);
         String btnLabel = "Import";
-        ctx.drawTextWithShadow(textRenderer, Text.literal(btnLabel),
-                bx + (BTN_W - textRenderer.getWidth(btnLabel)) / 2, y + 6,
+        ctx.text(font, Component.literal(btnLabel),
+                bx + (BTN_W - font.width(btnLabel)) / 2, y + 6,
                 atCap ? 0xFF555566 : 0xFFAAFFCC);
     }
 
-    private void renderBottomButtons(DrawContext ctx, int mx, int my) {
+    private void renderBottomButtons(GuiGraphicsExtractor ctx, int mx, int my) {
         int y = height - 26;
         int w = 84;
         int gap = 4;
@@ -258,15 +259,15 @@ public class GatherTransferScreen extends Screen {
         drawBottomButton(ctx, mx, my, x + (w + gap) * 3, y, w, "< Back", false);
     }
 
-    private void drawBottomButton(DrawContext ctx, int mx, int my, int x, int y, int w, String label, boolean active) {
+    private void drawBottomButton(GuiGraphicsExtractor ctx, int mx, int my, int x, int y, int w, String label, boolean active) {
         boolean hov = mx >= x && mx <= x + w && my >= y && my <= y + 18;
-        ctx.fill(x, y, x + w, y + 18, active ? 0xFF334466 : (hov ? 0xFF334455 : 0xFF24344F));
-        ctx.fill(x, y, x + w, y + 1, 0xFF667799);
-        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(label), x + w / 2, y + 5, 0xFFCCDDFF);
+        GatherTheme.fill(ctx, x, y, x + w, y + 18, active ? 0xFF334466 : (hov ? 0xFF334455 : 0xFF24344F));
+        GatherTheme.fill(ctx, x, y, x + w, y + 1, 0xFF667799);
+        ctx.centeredText(font, Component.literal(label), x + w / 2, y + 5, 0xFFCCDDFF);
     }
 
     @Override
-    public boolean mouseClicked(Click click, boolean focused) {
+    public boolean mouseClicked(MouseButtonEvent click, boolean focused) {
         int mx = (int) click.x();
         int my = (int) click.y();
 
@@ -302,7 +303,7 @@ public class GatherTransferScreen extends Screen {
                 scrollY = 0;
                 recalcContentHeight();
             } else {
-                close();
+                onClose();
             }
             return true;
         }
@@ -387,8 +388,8 @@ public class GatherTransferScreen extends Screen {
     }
 
     @Override
-    public void close() {
-        client.setScreen(parent);
+    public void onClose() {
+        minecraft.setScreen(parent);
     }
 
     private void recalcContentHeight() {
@@ -531,9 +532,9 @@ public class GatherTransferScreen extends Screen {
     }
 
     private String truncate(String text, int maxWidth) {
-        if (textRenderer.getWidth(text) <= maxWidth) return text;
+        if (font.width(text) <= maxWidth) return text;
         String value = text;
-        while (value.length() > 1 && textRenderer.getWidth(value + "..") > maxWidth) {
+        while (value.length() > 1 && font.width(value + "..") > maxWidth) {
             value = value.substring(0, value.length() - 1);
         }
         return value + "..";

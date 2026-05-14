@@ -4,11 +4,11 @@ import com.gather.network.GatherNetworking;
 import com.mojang.brigadier.context.CommandContext;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
-import net.minecraft.command.permission.Permission;
-import net.minecraft.command.permission.PermissionLevel;
-import net.minecraft.server.command.CommandManager;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.text.Text;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.permissions.Permission;
+import net.minecraft.server.permissions.PermissionLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,28 +25,28 @@ public class GatherMod implements ModInitializer {
 
     private static void registerCommands() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
-            dispatcher.register(CommandManager.literal("gatherop")
-                .then(CommandManager.literal("xray")
-                    .requires(src -> src.getPermissions().hasPermission(new Permission.Level(PermissionLevel.GAMEMASTERS)))
-                    .then(CommandManager.literal("on")
+            dispatcher.register(Commands.literal("gatherop")
+                .then(Commands.literal("xray")
+                    .requires(src -> src.permissions().hasPermission(new Permission.HasCommandLevel(PermissionLevel.GAMEMASTERS)))
+                    .then(Commands.literal("on")
                         .executes(ctx -> setXray(ctx, true)))
-                    .then(CommandManager.literal("off")
+                    .then(Commands.literal("off")
                         .executes(ctx -> setXray(ctx, false)))
-                    .then(CommandManager.literal("status")
+                    .then(Commands.literal("status")
                         .executes(GatherMod::xrayStatus)))));
     }
 
-    private static int setXray(CommandContext<ServerCommandSource> ctx, boolean value) {
+    private static int setXray(CommandContext<CommandSourceStack> ctx, boolean value) {
         GatherServerConfig.setXray(value);
         GatherNetworking.broadcastXrayPermission(ctx.getSource().getServer(), value);
-        ctx.getSource().sendFeedback(() -> Text.literal(
+        ctx.getSource().sendSuccess(() -> Component.literal(
                 "[Gather] Xray " + (value ? "enabled" : "disabled") + " for all players."), true);
         return 1;
     }
 
-    private static int xrayStatus(CommandContext<ServerCommandSource> ctx) {
+    private static int xrayStatus(CommandContext<CommandSourceStack> ctx) {
         boolean allowed = GatherServerConfig.isXrayAllowed();
-        ctx.getSource().sendFeedback(() -> Text.literal(
+        ctx.getSource().sendSuccess(() -> Component.literal(
                 "[Gather] Xray is currently " + (allowed ? "enabled" : "disabled") + "."), false);
         return 1;
     }

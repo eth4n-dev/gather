@@ -1,10 +1,10 @@
 package com.gather.network;
 
 import com.gather.GatherMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,36 +17,36 @@ public record AutoCraftPayload(
         String outputItemId,
         int outputCount,
         List<IngredientEntry> consume
-) implements CustomPayload {
+) implements CustomPacketPayload {
 
     public record IngredientEntry(String itemId, int count) {}
 
-    public static final Id<AutoCraftPayload> ID =
-            new Id<>(Identifier.of(GatherMod.MOD_ID, "auto_craft"));
+    public static final CustomPacketPayload.Type<AutoCraftPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(GatherMod.MOD_ID, "auto_craft"));
 
-    public static final PacketCodec<RegistryByteBuf, AutoCraftPayload> CODEC =
-            PacketCodec.of(
-                    (v, buf) -> {
-                        buf.writeString(v.outputItemId());
+    public static final StreamCodec<RegistryFriendlyByteBuf, AutoCraftPayload> CODEC =
+            StreamCodec.of(
+                    (buf, v) -> {
+                        buf.writeUtf(v.outputItemId());
                         buf.writeInt(v.outputCount());
                         buf.writeInt(v.consume().size());
                         for (IngredientEntry e : v.consume()) {
-                            buf.writeString(e.itemId());
+                            buf.writeUtf(e.itemId());
                             buf.writeInt(e.count());
                         }
                     },
                     buf -> {
-                        String out = buf.readString();
+                        String out = buf.readUtf();
                         int outCount = buf.readInt();
                         int size = buf.readInt();
                         List<IngredientEntry> list = new ArrayList<>();
                         for (int i = 0; i < size; i++) {
-                            list.add(new IngredientEntry(buf.readString(), buf.readInt()));
+                            list.add(new IngredientEntry(buf.readUtf(), buf.readInt()));
                         }
                         return new AutoCraftPayload(out, outCount, list);
                     }
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() { return ID; }
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return ID; }
 }

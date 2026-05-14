@@ -33,6 +33,7 @@ public class GatherSettings {
     public boolean autoRemoveCompleted = true;
     public boolean goalSoundEnabled = true;
     public boolean menuSpinAnimation = true;
+    public String uiTheme = "modern";
     public boolean countChests = false;
     public boolean hasShownWelcome = false;
     public boolean highlightEnabled = true;

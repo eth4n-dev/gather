@@ -1,12 +1,13 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherSettings;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.text.OrderedText;
-import net.minecraft.text.Text;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.network.chat.Component;
 
 import java.util.List;
 
@@ -78,7 +79,7 @@ public class GatherHelpScreen extends Screen {
     };
 
     public GatherHelpScreen(Screen parent, boolean showDontShowAgain) {
-        super(Text.literal("Gather Help"));
+        super(Component.literal("Gather Help"));
         this.parent = parent;
         this.showDontShowAgain = showDontShowAgain;
     }
@@ -90,43 +91,43 @@ public class GatherHelpScreen extends Screen {
         int by = panelY() + panelH() - 28;
 
         if (showDontShowAgain) {
-            addDrawableChild(ButtonWidget
-                    .builder(Text.literal("Don't show again"), btn -> {
+            addRenderableWidget(Button
+                    .builder(Component.literal("Don't show again"), btn -> {
                         GatherSettings.get().hasShownWelcome = true;
                         GatherSettings.get().save();
-                        close();
+                        onClose();
                     })
-                    .dimensions(cx - 106, by, 100, 20)
+                    .bounds(cx - 106, by, 100, 20)
                     .build());
-            addDrawableChild(ButtonWidget
-                    .builder(Text.literal("Close"), btn -> close())
-                    .dimensions(cx + 6, by, 100, 20)
+            addRenderableWidget(Button
+                    .builder(Component.literal("Close"), btn -> onClose())
+                    .bounds(cx + 6, by, 100, 20)
                     .build());
         } else {
-            addDrawableChild(ButtonWidget
-                    .builder(Text.literal("Close"), btn -> close())
-                    .dimensions(cx - 50, by, 100, 20)
+            addRenderableWidget(Button
+                    .builder(Component.literal("Close"), btn -> onClose())
+                    .bounds(cx - 50, by, 100, 20)
                     .build());
         }
     }
 
     @Override
-    public void render(DrawContext ctx, int mx, int my, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor ctx, int mx, int my, float delta) {
         int cx = width / 2;
         int panelW = panelW();
         int panelH = panelH();
         int px = cx - panelW / 2;
         int py = panelY();
 
-        ctx.fill(0, 0, width, height, 0x88000000);
-        ctx.fill(px, py, px + panelW, py + panelH, 0xEE0D1124);
-        ctx.fill(px, py, px + panelW, py + 1, 0xFF2255AA);
-        ctx.fill(px, py + panelH - 1, px + panelW, py + panelH, 0xFF2255AA);
-        ctx.fill(px, py, px + 1, py + panelH, 0xFF2255AA);
-        ctx.fill(px + panelW - 1, py, px + panelW, py + panelH, 0xFF2255AA);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0x88000000);
+        GatherTheme.fill(ctx, px, py, px + panelW, py + panelH, 0xEE0D1124);
+        GatherTheme.fill(ctx, px, py, px + panelW, py + 1, 0xFF2255AA);
+        GatherTheme.fill(ctx, px, py + panelH - 1, px + panelW, py + panelH, 0xFF2255AA);
+        GatherTheme.fill(ctx, px, py, px + 1, py + panelH, 0xFF2255AA);
+        GatherTheme.fill(ctx, px + panelW - 1, py, px + panelW, py + panelH, 0xFF2255AA);
 
-        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("Gather Help"), cx, py + 8, 0xFF88BBFF);
-        ctx.fill(px + 10, py + 19, px + panelW - 10, py + 20, 0x44336699);
+        ctx.centeredText(font, Component.literal("Gather Help"), cx, py + 8, 0xFF88BBFF);
+        GatherTheme.fill(ctx, px + 10, py + 19, px + panelW - 10, py + 20, 0x44336699);
 
         int contentTop = py + 27;
         int contentBot = py + panelH - 34;
@@ -159,27 +160,27 @@ public class GatherHelpScreen extends Screen {
         if (maxScroll > 0) {
             int barH = Math.max(16, contentH * contentH / totalH);
             int barY = contentTop + (scroll * (contentH - barH) / maxScroll);
-            ctx.fill(px + panelW - 8, contentTop, px + panelW - 5, contentBot, 0x22FFFFFF);
-            ctx.fill(px + panelW - 8, barY, px + panelW - 5, barY + barH, 0x88AACCFF);
+            GatherTheme.fill(ctx, px + panelW - 8, contentTop, px + panelW - 5, contentBot, 0x22FFFFFF);
+            GatherTheme.fill(ctx, px + panelW - 8, barY, px + panelW - 5, barY + barH, 0x88AACCFF);
         }
 
-        super.render(ctx, mx, my, delta);
+        super.extractRenderState(ctx, mx, my, delta);
     }
 
-    private void drawSection(DrawContext ctx, int px, int panelW, int y, String label) {
-        ctx.fill(px + 8, y + 10, px + panelW - 14, y + 11, 0x22336699);
-        ctx.drawTextWithShadow(textRenderer, Text.literal(label), px + 14, y + 5, 0xFFFFFF66);
+    private void drawSection(GuiGraphicsExtractor ctx, int px, int panelW, int y, String label) {
+        GatherTheme.fill(ctx, px + 8, y + 10, px + panelW - 14, y + 11, 0x22336699);
+        ctx.text(font, Component.literal(label), px + 14, y + 5, 0xFFFFFF66);
     }
 
-    private void drawTip(DrawContext ctx, int px, int panelW, int descX, int descW, int y, int h, int rowIndex, HelpEntry entry) {
-        if (rowIndex % 2 == 0) ctx.fill(px + 6, y, px + panelW - 10, y + h - 2, 0x11AACCFF);
-        ctx.drawTextWithShadow(textRenderer, Text.literal(entry.label()), px + 14, y + ROW_PAD + 1, 0xFF55CCFF);
-        ctx.fill(px + 14 + LABEL_W, y + 4, px + 15 + LABEL_W, y + h - 5, 0x33336699);
+    private void drawTip(GuiGraphicsExtractor ctx, int px, int panelW, int descX, int descW, int y, int h, int rowIndex, HelpEntry entry) {
+        if (rowIndex % 2 == 0) GatherTheme.fill(ctx, px + 6, y, px + panelW - 10, y + h - 2, 0x11AACCFF);
+        ctx.text(font, Component.literal(entry.label()), px + 14, y + ROW_PAD + 1, 0xFF55CCFF);
+        GatherTheme.fill(ctx, px + 14 + LABEL_W, y + 4, px + 15 + LABEL_W, y + h - 5, 0x33336699);
 
-        List<OrderedText> lines = textRenderer.wrapLines(Text.literal(entry.body()), descW);
+        List<FormattedCharSequence> lines = font.split(Component.literal(entry.body()), descW);
         int ty = y + ROW_PAD + 1;
-        for (OrderedText line : lines) {
-            ctx.drawTextWithShadow(textRenderer, line, descX, ty, 0xFFAABBCC);
+        for (FormattedCharSequence line : lines) {
+            ctx.text(font, line, descX, ty, 0xFFAABBCC);
             ty += LINE_H;
         }
     }
@@ -192,7 +193,7 @@ public class GatherHelpScreen extends Screen {
 
     private int entryHeight(HelpEntry entry, int descW) {
         if (entry.isSection()) return 24;
-        int lines = Math.max(1, textRenderer.wrapLines(Text.literal(entry.body()), descW).size());
+        int lines = Math.max(1, font.split(Component.literal(entry.body()), descW).size());
         return Math.max(24, ROW_PAD * 2 + lines * LINE_H);
     }
 
@@ -203,7 +204,7 @@ public class GatherHelpScreen extends Screen {
     }
 
     @Override
-    public boolean mouseClicked(Click click, boolean focused) {
+    public boolean mouseClicked(MouseButtonEvent click, boolean focused) {
         int mx = (int) click.x();
         int my = (int) click.y();
         if (click.button() == 0 && insideScrollbar(mx, my)) {
@@ -215,7 +216,7 @@ public class GatherHelpScreen extends Screen {
     }
 
     @Override
-    public boolean mouseDragged(Click click, double deltaX, double deltaY) {
+    public boolean mouseDragged(MouseButtonEvent click, double deltaX, double deltaY) {
         if (draggingScrollbar) {
             applyScrollbarDrag((int) click.y());
             return true;
@@ -224,7 +225,7 @@ public class GatherHelpScreen extends Screen {
     }
 
     @Override
-    public boolean mouseReleased(Click click) {
+    public boolean mouseReleased(MouseButtonEvent click) {
         draggingScrollbar = false;
         return super.mouseReleased(click);
     }
@@ -274,5 +275,5 @@ public class GatherHelpScreen extends Screen {
     private int panelY() { return height / 2 - panelH() / 2; }
 
     @Override
-    public void close() { client.setScreen(parent); }
+    public void onClose() { minecraft.setScreen(parent); }
 }

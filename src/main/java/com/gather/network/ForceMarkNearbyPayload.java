@@ -1,19 +1,19 @@
 package com.gather.network;
 
 import com.gather.GatherMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
-public record ForceMarkNearbyPayload() implements CustomPayload {
+public record ForceMarkNearbyPayload() implements CustomPacketPayload {
 
-    public static final Id<ForceMarkNearbyPayload> ID =
-            new Id<>(Identifier.of(GatherMod.MOD_ID, "force_mark_nearby"));
+    public static final CustomPacketPayload.Type<ForceMarkNearbyPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(GatherMod.MOD_ID, "force_mark_nearby"));
 
-    public static final PacketCodec<RegistryByteBuf, ForceMarkNearbyPayload> CODEC =
-            PacketCodec.of((v, buf) -> {}, buf -> new ForceMarkNearbyPayload());
+    public static final StreamCodec<RegistryFriendlyByteBuf, ForceMarkNearbyPayload> CODEC =
+            StreamCodec.of((buf, v) -> {}, buf -> new ForceMarkNearbyPayload());
 
     @Override
-    public Id<? extends CustomPayload> getId() { return ID; }
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return ID; }
 }

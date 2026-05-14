@@ -1,37 +1,37 @@
 package com.gather.network;
 
 import com.gather.GatherMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 import java.util.HashMap;
 import java.util.Map;
 
-public record BreakdownResultPayload(String originItemId, Map<String, Integer> ingredients, boolean inventoryCraftable) implements CustomPayload {
+public record BreakdownResultPayload(String originItemId, Map<String, Integer> ingredients, boolean inventoryCraftable) implements CustomPacketPayload {
 
-    public static final Id<BreakdownResultPayload> ID =
-            new Id<>(Identifier.of(GatherMod.MOD_ID, "breakdown_result"));
+    public static final CustomPacketPayload.Type<BreakdownResultPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(GatherMod.MOD_ID, "breakdown_result"));
 
-    public static final PacketCodec<RegistryByteBuf, BreakdownResultPayload> CODEC =
-            PacketCodec.of(
-                    (v, buf) -> {
-                        buf.writeString(v.originItemId());
+    public static final StreamCodec<RegistryFriendlyByteBuf, BreakdownResultPayload> CODEC =
+            StreamCodec.of(
+                    (buf, v) -> {
+                        buf.writeUtf(v.originItemId());
                         buf.writeInt(v.ingredients().size());
-                        v.ingredients().forEach((id, cnt) -> { buf.writeString(id); buf.writeInt(cnt); });
+                        v.ingredients().forEach((id, cnt) -> { buf.writeUtf(id); buf.writeInt(cnt); });
                         buf.writeBoolean(v.inventoryCraftable());
                     },
                     buf -> {
-                        String origin = buf.readString();
+                        String origin = buf.readUtf();
                         int size = buf.readInt();
                         Map<String, Integer> map = new HashMap<>();
-                        for (int i = 0; i < size; i++) map.put(buf.readString(), buf.readInt());
+                        for (int i = 0; i < size; i++) map.put(buf.readUtf(), buf.readInt());
                         boolean inv = buf.readBoolean();
                         return new BreakdownResultPayload(origin, map, inv);
                     }
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() { return ID; }
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return ID; }
 }

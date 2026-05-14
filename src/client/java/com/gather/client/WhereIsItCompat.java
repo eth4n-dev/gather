@@ -1,6 +1,6 @@
 package com.gather.client;
 
-import net.minecraft.client.render.RenderLayer;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,12 +11,12 @@ final class WhereIsItCompat {
     private static final Logger LOGGER = LoggerFactory.getLogger("Gather/WhereIsItCompat");
 
     private static boolean lookedUp;
-    private static RenderLayer debugQuadsNoDepth;
+    private static RenderType debugQuadsNoDepth;
 
     private WhereIsItCompat() {
     }
 
-    static RenderLayer debugQuadsNoDepth() {
+    static RenderType debugQuadsNoDepth() {
         if (lookedUp) return debugQuadsNoDepth;
         lookedUp = true;
 
@@ -34,14 +34,14 @@ final class WhereIsItCompat {
                 }
             }
 
-            if (layer instanceof RenderLayer renderLayer) {
+            if (layer instanceof RenderType renderLayer) {
                 debugQuadsNoDepth = renderLayer;
-                LOGGER.info("Using WhereIsIt DEBUG_QUADS_NO_DEPTH RenderLayer for scanned chest xray.");
+                LOGGER.info("Using WhereIsIt DEBUG_QUADS_NO_DEPTH RenderType for scanned chest xray.");
             } else {
                 LOGGER.warn("WhereIsIt is present, but DEBUG_QUADS_NO_DEPTH was not available; scanned chest xray will use normal outline fallback.");
             }
         } catch (ReflectiveOperationException | LinkageError ignored) {
-            LOGGER.warn("WhereIsIt xray RenderLayer was not found; scanned chest xray will use normal outline fallback.");
+            LOGGER.warn("WhereIsIt xray RenderType was not found; scanned chest xray will use normal outline fallback.");
             debugQuadsNoDepth = null;
         }
 

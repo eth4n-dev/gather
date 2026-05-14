@@ -1,12 +1,13 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherSettings;
 import com.gather.client.WorldHighlightRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.SliderWidget;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.AbstractSliderButton;
+import net.minecraft.network.chat.Component;
 
 import java.util.List;
 
@@ -26,11 +27,11 @@ public class GatherOutlinesSettingsScreen extends Screen {
     private static final int[] PRESET_RAMP_SECONDS = {12, 6, 3, 1};
 
     private final Screen parent;
-    private List<Text> hoveredTooltip = null;
+    private List<Component> hoveredTooltip = null;
     private int tooltipX, tooltipY;
 
     public GatherOutlinesSettingsScreen(Screen parent) {
-        super(Text.literal("Outlines Settings"));
+        super(Component.literal("Outlines Settings"));
         this.parent = parent;
     }
 
@@ -40,29 +41,29 @@ public class GatherOutlinesSettingsScreen extends Screen {
         int cy = height / 2 + 12;
 
         int presetY = cy - 82;
-        addDrawableChild(ButtonWidget
+        addRenderableWidget(Button
                 .builder(presetText(), btn -> {
                     applyPreset(nextPresetIndex());
-                    client.setScreen(new GatherOutlinesSettingsScreen(parent));
+                    minecraft.setScreen(new GatherOutlinesSettingsScreen(parent));
                 })
-                .dimensions(cx - 100, presetY, 200, 20)
+                .bounds(cx - 100, presetY, 200, 20)
                 .build());
 
-        addDrawableChild(ButtonWidget
+        addRenderableWidget(Button
                 .builder(stateText("Outlines", GatherSettings.get().highlightEnabled), btn -> {
                     GatherSettings.get().highlightEnabled = !GatherSettings.get().highlightEnabled;
                     GatherSettings.get().save();
                     WorldHighlightRenderer.invalidateCache();
                     btn.setMessage(stateText("Outlines", GatherSettings.get().highlightEnabled));
                 })
-                .dimensions(cx - 100, cy - 55, 200, 20)
+                .bounds(cx - 100, cy - 55, 200, 20)
                 .build());
 
-        addDrawableChild(new SliderWidget(cx - 100, cy - 30, 200, 20,
-                Text.literal("Outline Range: " + GatherSettings.get().highlightRadius),
+        addRenderableWidget(new AbstractSliderButton(cx - 100, cy - 30, 200, 20,
+                Component.literal("Outline Range: " + GatherSettings.get().highlightRadius),
                 (clamp(GatherSettings.get().highlightRadius, MIN_RADIUS, MAX_RADIUS) - MIN_RADIUS)
                         / (double) (MAX_RADIUS - MIN_RADIUS)) {
-            @Override protected void updateMessage() { setMessage(Text.literal("Outline Range: " + toRadius())); }
+            @Override protected void updateMessage() { setMessage(Component.literal("Outline Range: " + toRadius())); }
             @Override protected void applyValue() {
                 GatherSettings.get().highlightRadius = toRadius();
                 GatherSettings.get().save();
@@ -71,11 +72,11 @@ public class GatherOutlinesSettingsScreen extends Screen {
             private int toRadius() { return MIN_RADIUS + (int) Math.round(value * (MAX_RADIUS - MIN_RADIUS)); }
         });
 
-        addDrawableChild(new SliderWidget(cx - 100, cy - 5, 200, 20,
-                Text.literal("Max Outlines: " + GatherSettings.get().maxBlockHighlights),
+        addRenderableWidget(new AbstractSliderButton(cx - 100, cy - 5, 200, 20,
+                Component.literal("Max Outlines: " + GatherSettings.get().maxBlockHighlights),
                 (clamp(GatherSettings.get().maxBlockHighlights, MIN_OUTLINES, MAX_OUTLINES) - MIN_OUTLINES)
                         / (double) (MAX_OUTLINES - MIN_OUTLINES)) {
-            @Override protected void updateMessage() { setMessage(Text.literal("Max Outlines: " + toVal())); }
+            @Override protected void updateMessage() { setMessage(Component.literal("Max Outlines: " + toVal())); }
             @Override protected void applyValue() {
                 GatherSettings.get().maxBlockHighlights = toVal();
                 GatherSettings.get().save();
@@ -84,10 +85,10 @@ public class GatherOutlinesSettingsScreen extends Screen {
             private int toVal() { return MIN_OUTLINES + (int) Math.round(value * (MAX_OUTLINES - MIN_OUTLINES)); }
         });
 
-        addDrawableChild(new SliderWidget(cx - 100, cy + 20, 200, 20,
-                Text.literal("Outline Load: " + loadLabelForSeconds(GatherSettings.get().highlightRampSeconds)),
+        addRenderableWidget(new AbstractSliderButton(cx - 100, cy + 20, 200, 20,
+                Component.literal("Outline Load: " + loadLabelForSeconds(GatherSettings.get().highlightRampSeconds)),
                 loadIndexForSeconds(GatherSettings.get().highlightRampSeconds) / (double) (LOAD_SECONDS.length - 1)) {
-            @Override protected void updateMessage() { setMessage(Text.literal("Outline Load: " + LOAD_LABELS[toIndex()])); }
+            @Override protected void updateMessage() { setMessage(Component.literal("Outline Load: " + LOAD_LABELS[toIndex()])); }
             @Override protected void applyValue() {
                 GatherSettings.get().highlightRampSeconds = LOAD_SECONDS[toIndex()];
                 GatherSettings.get().save();
@@ -98,43 +99,43 @@ public class GatherOutlinesSettingsScreen extends Screen {
         });
 
         String[] colors = {"rainbow", "blue", "red", "green", "yellow", "white"};
-        addDrawableChild(ButtonWidget
-                .builder(Text.literal("Outline Color: " + GatherSettings.get().outlineColor), btn -> {
+        addRenderableWidget(Button
+                .builder(Component.literal("Outline Color: " + GatherSettings.get().outlineColor), btn -> {
                     String cur = GatherSettings.get().outlineColor;
                     int idx = 0;
                     for (int i = 0; i < colors.length; i++) if (colors[i].equals(cur)) { idx = i; break; }
                     String next = colors[(idx + 1) % colors.length];
                     GatherSettings.get().outlineColor = next;
                     GatherSettings.get().save();
-                    btn.setMessage(Text.literal("Outline Color: " + next));
+                    btn.setMessage(Component.literal("Outline Color: " + next));
                 })
-                .dimensions(cx - 100, cy + 45, 200, 20)
+                .bounds(cx - 100, cy + 45, 200, 20)
                 .build());
 
-        addDrawableChild(ButtonWidget
+        addRenderableWidget(Button
                 .builder(stateText("Collector Outlines", GatherSettings.get().collectorOutlinesEnabled), btn -> {
                     GatherSettings.get().collectorOutlinesEnabled = !GatherSettings.get().collectorOutlinesEnabled;
                     GatherSettings.get().save();
                     WorldHighlightRenderer.invalidateCache();
                     btn.setMessage(stateText("Collector Outlines", GatherSettings.get().collectorOutlinesEnabled));
                 })
-                .dimensions(cx - 100, cy + 70, 200, 20)
+                .bounds(cx - 100, cy + 70, 200, 20)
                 .build());
 
-        addDrawableChild(ButtonWidget
-                .builder(Text.literal("Back"), btn -> close())
-                .dimensions(cx - 50, cy + 95, 100, 20)
+        addRenderableWidget(Button
+                .builder(Component.literal("Back"), btn -> onClose())
+                .bounds(cx - 50, cy + 95, 100, 20)
                 .build());
     }
 
     @Override
-    public void render(DrawContext ctx, int mx, int my, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor ctx, int mx, int my, float delta) {
         hoveredTooltip = null;
-        ctx.fill(0, 0, width, height, 0xCC111122);
-        ctx.drawCenteredTextWithShadow(textRenderer, title, width / 2, height / 2 - 88, 0xFFCCDDFF);
-        super.render(ctx, mx, my, delta);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
+        ctx.centeredText(font, title, width / 2, height / 2 - 88, 0xFFCCDDFF);
+        super.extractRenderState(ctx, mx, my, delta);
         drawHoverInfo(mx, my);
-        if (hoveredTooltip != null) ctx.drawTooltip(textRenderer, hoveredTooltip, tooltipX, tooltipY);
+        if (hoveredTooltip != null) ctx.setComponentTooltipForNextFrame(font, hoveredTooltip, tooltipX, tooltipY);
     }
 
     private void drawHoverInfo(int mx, int my) {
@@ -142,40 +143,40 @@ public class GatherOutlinesSettingsScreen extends Screen {
         int cy = height / 2 + 12;
         if (inside(mx, my, cx - 100, cy - 82, 200, 20)) {
             setTooltip(mx, my,
-                    Text.literal("Cycles Performance, Balanced, Fancy, and Extreme."),
-                    Text.literal("Changes range, max outlines, load speed, and scan budget."));
+                    Component.literal("Cycles Performance, Balanced, Fancy, and Extreme."),
+                    Component.literal("Changes range, max outlines, load speed, and scan budget."));
             return;
         }
         if (inside(mx, my, cx - 100, cy - 55, 200, 20)) {
             setTooltip(mx, my,
-                    Text.literal("Master toggle for Gather block outlines."),
-                    Text.literal("Applies to normal outlines and block xray outlines."));
+                    Component.literal("Master toggle for Gather block outlines."),
+                    Component.literal("Applies to normal outlines and block xray outlines."));
         } else if (inside(mx, my, cx - 100, cy - 30, 200, 20)) {
             setTooltip(mx, my,
-                    Text.literal("How far Gather scans for matching placed blocks."),
-                    Text.literal("Higher values cost more rendering and scanning work."));
+                    Component.literal("How far Gather scans for matching placed blocks."),
+                    Component.literal("Higher values cost more rendering and scanning work."));
         } else if (inside(mx, my, cx - 100, cy - 5, 200, 20)) {
             setTooltip(mx, my,
-                    Text.literal("Max number of block outlines shown at once."),
-                    Text.literal("High values can reduce FPS and mainly use GPU power."),
-                    Text.literal("Nearest blocks load first."));
+                    Component.literal("Max number of block outlines shown at once."),
+                    Component.literal("High values can reduce FPS and mainly use GPU power."),
+                    Component.literal("Nearest blocks load first."));
         } else if (inside(mx, my, cx - 100, cy + 20, 200, 20)) {
             setTooltip(mx, my,
-                    Text.literal("How fast extra outlines appear."),
-                    Text.literal("Slower settings spread GPU load over more time."),
-                    Text.literal("High Max Outlines can still impact FPS."));
+                    Component.literal("How fast extra outlines appear."),
+                    Component.literal("Slower settings spread GPU load over more time."),
+                    Component.literal("High Max Outlines can still impact FPS."));
         } else if (inside(mx, my, cx - 100, cy + 45, 200, 20)) {
             setTooltip(mx, my,
-                    Text.literal("Color for placed-block outlines."),
-                    Text.literal("Used by normal outlines and block xray outlines."));
+                    Component.literal("Color for placed-block outlines."),
+                    Component.literal("Used by normal outlines and block xray outlines."));
         } else if (inside(mx, my, cx - 100, cy + 70, 200, 20)) {
             setTooltip(mx, my,
-                    Text.literal("Show purple outlines for placed collector shulkers."),
-                    Text.literal("Shows even when chest outlines are OFF."));
+                    Component.literal("Show purple outlines for placed collector shulkers."),
+                    Component.literal("Shows even when chest outlines are OFF."));
         }
     }
 
-    private void setTooltip(int mx, int my, Text... lines) {
+    private void setTooltip(int mx, int my, Component... lines) {
         hoveredTooltip = List.of(lines);
         tooltipX = mx;
         tooltipY = my + 18;
@@ -211,10 +212,10 @@ public class GatherOutlinesSettingsScreen extends Screen {
         return exact >= 0 ? PRESET_LABELS[exact] : "Custom";
     }
 
-    private static Text presetText() {
+    private static Component presetText() {
         String label = presetLabel();
-        return Text.literal("Preset: ")
-                .append(Text.literal(label).styled(style -> style.withColor(presetColor(label))));
+        return Component.literal("Preset: ")
+                .append(Component.literal(label).withStyle(style -> style.withColor(presetColor(label))));
     }
 
     private static int presetColor(String label) {
@@ -255,14 +256,14 @@ public class GatherOutlinesSettingsScreen extends Screen {
         WorldHighlightRenderer.invalidateCache();
     }
 
-    private static Text stateText(String label, boolean enabled) {
-        return Text.literal(label + ": ")
-                .append(Text.literal(enabled ? "ON" : "OFF").styled(style ->
+    private static Component stateText(String label, boolean enabled) {
+        return Component.literal(label + ": ")
+                .append(Component.literal(enabled ? "ON" : "OFF").withStyle(style ->
                         style.withColor(enabled ? 0x55FF77 : 0xFF6666)));
     }
 
     @Override
-    public void close() {
-        client.setScreen(parent);
+    public void onClose() {
+        minecraft.setScreen(parent);
     }
 }

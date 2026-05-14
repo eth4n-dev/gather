@@ -1,15 +1,16 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherSettings;
-import net.minecraft.client.gl.RenderPipelines;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.item.Items;
-import net.minecraft.text.OrderedText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.world.item.Items;
+import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.List;
@@ -138,7 +139,7 @@ public class GatherTutorialScreen extends Screen {
     private int   renderedCardY, renderedCardX, renderedCardW, renderedCardH;
 
     public GatherTutorialScreen() {
-        super(Text.literal("Gather Tutorial"));
+        super(Component.literal("Gather Tutorial"));
     }
 
     // ── Highlight helpers ────────────────────────────────────────────────────
@@ -229,7 +230,7 @@ public class GatherTutorialScreen extends Screen {
     private int cardH(Step s, int innerW) {
         int lineCount = 0;
         for (String line : s.lines()) {
-            List<OrderedText> wrapped = textRenderer.wrapLines(Text.literal(line), innerW);
+            List<FormattedCharSequence> wrapped = font.split(Component.literal(line), innerW);
             lineCount += Math.max(1, wrapped.size());
         }
         return 24 + lineCount * 11 + 26;
@@ -321,18 +322,18 @@ public class GatherTutorialScreen extends Screen {
     private void finish() {
         GatherSettings.get().hasShownWelcome = true;
         GatherSettings.get().save();
-        client.setScreen(null);
+        minecraft.setScreen(null);
     }
 
     // ── Rendering ────────────────────────────────────────────────────────────
 
     @Override
-    public void render(DrawContext ctx, int mx, int my, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor ctx, int mx, int my, float delta) {
         Step s   = STEPS[step];
         long now = System.currentTimeMillis();
 
         switch (s.bg()) {
-            case MENU     -> { if (embeddedMenu != null) embeddedMenu.render(ctx, -9999, -9999, delta); }
+            case MENU     -> { if (embeddedMenu != null) embeddedMenu.extractRenderState(ctx, -9999, -9999, delta); }
             case CRAFTING -> drawCraftingMockup(ctx);
             case SHULKER  -> drawShulkerMockup(ctx);
             default       -> {}
@@ -356,52 +357,52 @@ public class GatherTutorialScreen extends Screen {
 
     // ── Spotlight ────────────────────────────────────────────────────────────
 
-    private void drawSpotlight(DrawContext ctx, int[] hl, long now) {
+    private void drawSpotlight(GuiGraphicsExtractor ctx, int[] hl, long now) {
         int dark = 0xBB000000;
-        if (hl == null) { ctx.fill(0, 0, width, height, dark); return; }
+        if (hl == null) { GatherTheme.fill(ctx, 0, 0, width, height, dark); return; }
 
         int pad = 5;
         int x1 = Math.max(0, hl[0] - pad), y1 = Math.max(0, hl[1] - pad);
         int x2 = Math.min(width,  hl[0] + hl[2] + pad);
         int y2 = Math.min(height, hl[1] + hl[3] + pad);
 
-        ctx.fill(0,  0,     width, y1,     dark);
-        ctx.fill(0,  y2,    width, height, dark);
-        ctx.fill(0,  y1,    x1,   y2,     dark);
-        ctx.fill(x2, y1,    width, y2,     dark);
+        GatherTheme.fill(ctx, 0,  0,     width, y1,     dark);
+        GatherTheme.fill(ctx, 0,  y2,    width, height, dark);
+        GatherTheme.fill(ctx, 0,  y1,    x1,   y2,     dark);
+        GatherTheme.fill(ctx, x2, y1,    width, y2,     dark);
 
         float pulse = (float)(Math.sin((now % 2000) / 2000.0 * Math.PI * 2) * 0.5 + 0.5);
         int ga = (int)(0x99 + 0x44 * pulse);
         int gc = (ga << 24) | 0x4499FF;
-        ctx.fill(x1,   y1,   x2,   y1+2,  gc);
-        ctx.fill(x1,   y2-2, x2,   y2,    gc);
-        ctx.fill(x1,   y1,   x1+2, y2,    gc);
-        ctx.fill(x2-2, y1,   x2,   y2,    gc);
+        GatherTheme.fill(ctx, x1,   y1,   x2,   y1+2,  gc);
+        GatherTheme.fill(ctx, x1,   y2-2, x2,   y2,    gc);
+        GatherTheme.fill(ctx, x1,   y1,   x1+2, y2,    gc);
+        GatherTheme.fill(ctx, x2-2, y1,   x2,   y2,    gc);
     }
 
     // ── Fake HUD content ─────────────────────────────────────────────────────
 
-    private void drawFakeHudContent(DrawContext ctx, int[] hl, int hudStep) {
+    private void drawFakeHudContent(GuiGraphicsExtractor ctx, int[] hl, int hudStep) {
         int x = hl[0], y = hl[1], w = hl[2];
-        ctx.fill(x, y, x + w, y + hl[3], 0xFF050A15);
-        ctx.fill(x, y, x + w, y + 1, 0xFF334466);
+        GatherTheme.fill(ctx, x, y, x + w, y + hl[3], 0xFF050A15);
+        GatherTheme.fill(ctx, x, y, x + w, y + 1, 0xFF334466);
 
         Object[][] rows    = hudStep == 0 ? FAKE_GOALS : hudStep == 1 ? FAKE_MATERIALS : FAKE_CRAFT;
         String[]   headers = { "Goals", "Materials", "Craft Ready" };
 
-        ctx.drawTextWithShadow(textRenderer, Text.literal(headers[hudStep]), x + 4, y + 4, 0xFF557799);
-        ctx.fill(x, y + 13, x + w, y + 14, 0x33336699);
+        ctx.text(font, Component.literal(headers[hudStep]), x + 4, y + 4, 0xFF557799);
+        GatherTheme.fill(ctx, x, y + 13, x + w, y + 14, 0x33336699);
 
         int ry = y + 18;
         for (Object[] row : rows) {
             if (ry + 18 > y + hl[3]) break;
-            net.minecraft.item.Item item = (net.minecraft.item.Item) row[0];
-            ctx.drawItem(item.getDefaultStack(), x + 2, ry);
+            net.minecraft.world.item.Item item = (net.minecraft.world.item.Item) row[0];
+            ctx.item(item.getDefaultInstance(), x + 2, ry);
             String cnt  = (String) row[2];
-            int    cw   = textRenderer.getWidth(cnt);
-            String name = textRenderer.trimToWidth((String) row[1], w - 20 - cw - 6);
-            ctx.drawTextWithShadow(textRenderer, Text.literal(name), x + 20, ry + 4, 0xFFCCDDEE);
-            ctx.drawTextWithShadow(textRenderer, Text.literal(cnt),
+            int    cw   = font.width(cnt);
+            String name = font.plainSubstrByWidth((String) row[1], w - 20 - cw - 6);
+            ctx.text(font, Component.literal(name), x + 20, ry + 4, 0xFFCCDDEE);
+            ctx.text(font, Component.literal(cnt),
                     x + w - cw - 3, ry + 4,
                     hudStep == 2 ? 0xFF33DD99 : 0xFF8899AA);
             ry += 18;
@@ -409,18 +410,18 @@ public class GatherTutorialScreen extends Screen {
     }
 
     private static final Identifier CRAFTING_TEX =
-        Identifier.of("minecraft", "textures/gui/container/crafting_table.png");
+        Identifier.fromNamespaceAndPath("minecraft", "textures/gui/container/crafting_table.png");
 
     // ── Crafting mockup ──────────────────────────────────────────────────────
 
-    private void drawCraftingMockup(DrawContext ctx) {
-        ctx.fill(0, 0, width, height, 0x80000000);
+    private void drawCraftingMockup(GuiGraphicsExtractor ctx) {
+        GatherTheme.fill(ctx, 0, 0, width, height, 0x80000000);
 
         int bgW = 176, bgH = 166;
         int bgX = width / 2 - bgW / 2;
         int bgY = height / 2 - bgH / 2;
 
-        ctx.drawTexture(RenderPipelines.GUI_TEXTURED, CRAFTING_TEX,
+        ctx.blit(RenderPipelines.GUI_TEXTURED, CRAFTING_TEX,
                 bgX, bgY, 0, 0, bgW, bgH, 256, 256);
 
         int panW = 186, panH = 132;
@@ -429,7 +430,7 @@ public class GatherTutorialScreen extends Screen {
         int panY = bgY + 18;
 
         drawCraftingPanel(ctx, panX, panY, panW, panH);
-        ctx.drawText(textRenderer, Text.literal("Crafting Goals"), panX + 6, panY + 6, 0xFFCCDDFF, false);
+        ctx.text(font, Component.literal("Crafting Goals"), panX + 6, panY + 6, 0xFFCCDDFF, false);
         drawCraftingCloseButton(ctx, panX + panW - 15, panY + 5);
 
         Object[][] rows = {
@@ -443,11 +444,11 @@ public class GatherTutorialScreen extends Screen {
         for (int i = 0; i < 3; i++) {
             Object[] row = rows[i];
             drawCraftingSlotRow(ctx, panX + 5, rowY, panW - 13, 26, false);
-            net.minecraft.item.Item item = (net.minecraft.item.Item) row[0];
+            net.minecraft.world.item.Item item = (net.minecraft.world.item.Item) row[0];
             drawCraftingItemSlot(ctx, panX + 9, rowY + 4);
-            ctx.drawItem(item.getDefaultStack(), panX + 10, rowY + 5);
-            ctx.drawText(textRenderer, Text.literal((String)row[1]), panX + 33, rowY + 4, 0xFFCCDDFF, false);
-            ctx.drawText(textRenderer, Text.literal((String)row[2]), panX + 33, rowY + 15, 0xFF8DA1B8, false);
+            ctx.item(item.getDefaultInstance(), panX + 10, rowY + 5);
+            ctx.text(font, Component.literal((String)row[1]), panX + 33, rowY + 4, 0xFFCCDDFF, false);
+            ctx.text(font, Component.literal((String)row[2]), panX + 33, rowY + 15, 0xFF8DA1B8, false);
             rowY += 28;
         }
 
@@ -455,60 +456,60 @@ public class GatherTutorialScreen extends Screen {
         int barY = rowsTop;
         int barH = 3 * 28 - 2;
         int thumbH = Math.max(16, barH * 3 / rows.length);
-        ctx.fill(barX, barY, barX + 3, barY + barH, 0x22445566);
-        ctx.fill(barX, barY, barX + 3, barY + thumbH, 0xFF445566);
-        ctx.fill(barX + 1, barY + 1, barX + 3, barY + thumbH, 0xFF223344);
+        GatherTheme.fill(ctx, barX, barY, barX + 3, barY + barH, 0x22445566);
+        GatherTheme.fill(ctx, barX, barY, barX + 3, barY + thumbH, 0xFF445566);
+        GatherTheme.fill(ctx, barX + 1, barY + 1, barX + 3, barY + thumbH, 0xFF223344);
     }
 
-    private void drawCraftingPanel(DrawContext ctx, int x, int y, int w, int h) {
-        ctx.fill(x + 3, y + 3, x + w + 3, y + h + 3, 0x66000000);
-        ctx.fill(x, y, x + w, y + h, 0xEE0D1826);
-        ctx.fill(x, y, x + w, y + 1, 0xFF334455);
-        ctx.fill(x, y, x + 1, y + h, 0xFF334455);
-        ctx.fill(x + w - 1, y, x + w, y + h, 0xFF07111F);
-        ctx.fill(x, y + h - 1, x + w, y + h, 0xFF07111F);
-        ctx.fill(x + 1, y + 1, x + w - 1, y + 2, 0xFF1D3045);
-        ctx.fill(x + 1, y + 1, x + 2, y + h - 1, 0xFF1D3045);
-        ctx.fill(x + 4, y + 20, x + w - 4, y + 21, 0xFF334455);
+    private void drawCraftingPanel(GuiGraphicsExtractor ctx, int x, int y, int w, int h) {
+        GatherTheme.fill(ctx, x + 3, y + 3, x + w + 3, y + h + 3, 0x66000000);
+        GatherTheme.fill(ctx, x, y, x + w, y + h, 0xEE0D1826);
+        GatherTheme.fill(ctx, x, y, x + w, y + 1, 0xFF334455);
+        GatherTheme.fill(ctx, x, y, x + 1, y + h, 0xFF334455);
+        GatherTheme.fill(ctx, x + w - 1, y, x + w, y + h, 0xFF07111F);
+        GatherTheme.fill(ctx, x, y + h - 1, x + w, y + h, 0xFF07111F);
+        GatherTheme.fill(ctx, x + 1, y + 1, x + w - 1, y + 2, 0xFF1D3045);
+        GatherTheme.fill(ctx, x + 1, y + 1, x + 2, y + h - 1, 0xFF1D3045);
+        GatherTheme.fill(ctx, x + 4, y + 20, x + w - 4, y + 21, 0xFF334455);
     }
 
-    private void drawCraftingCloseButton(DrawContext ctx, int x, int y) {
-        ctx.fill(x, y, x + 9, y + 9, 0xFF17283B);
-        ctx.drawText(textRenderer, Text.literal("x"), x + 2, y, 0xFFCCDDFF, false);
+    private void drawCraftingCloseButton(GuiGraphicsExtractor ctx, int x, int y) {
+        GatherTheme.fill(ctx, x, y, x + 9, y + 9, 0xFF17283B);
+        ctx.text(font, Component.literal("x"), x + 2, y, 0xFFCCDDFF, false);
     }
 
-    private static void drawCraftingSlotRow(DrawContext ctx, int x, int y, int w, int h, boolean hovered) {
-        ctx.fill(x, y, x + w, y + h, 0xFF101C2C);
-        ctx.fill(x + 2, y + 2, x + w - 1, y + h - 1, hovered ? 0x88334466 : 0x33223344);
-        ctx.fill(x, y, x + w, y + 1, 0xFF101C2C);
-        ctx.fill(x, y, x + 1, y + h, 0xFF101C2C);
-        ctx.fill(x + 1, y + 1, x + w - 1, y + 2, 0xFF101C2C);
-        ctx.fill(x + 1, y + 1, x + 2, y + h - 1, 0xFF101C2C);
-        ctx.fill(x + w - 2, y + 1, x + w, y + h, 0xFF3A5570);
-        ctx.fill(x + 1, y + h - 2, x + w, y + h, 0xFF3A5570);
+    private static void drawCraftingSlotRow(GuiGraphicsExtractor ctx, int x, int y, int w, int h, boolean hovered) {
+        GatherTheme.fill(ctx, x, y, x + w, y + h, 0xFF101C2C);
+        GatherTheme.fill(ctx, x + 2, y + 2, x + w - 1, y + h - 1, hovered ? 0x88334466 : 0x33223344);
+        GatherTheme.fill(ctx, x, y, x + w, y + 1, 0xFF101C2C);
+        GatherTheme.fill(ctx, x, y, x + 1, y + h, 0xFF101C2C);
+        GatherTheme.fill(ctx, x + 1, y + 1, x + w - 1, y + 2, 0xFF101C2C);
+        GatherTheme.fill(ctx, x + 1, y + 1, x + 2, y + h - 1, 0xFF101C2C);
+        GatherTheme.fill(ctx, x + w - 2, y + 1, x + w, y + h, 0xFF3A5570);
+        GatherTheme.fill(ctx, x + 1, y + h - 2, x + w, y + h, 0xFF3A5570);
     }
 
-    private static void drawCraftingItemSlot(DrawContext ctx, int x, int y) {
-        ctx.fill(x, y, x + 18, y + 18, 0xFF162335);
-        ctx.fill(x, y, x + 18, y + 1, 0xFF07111F);
-        ctx.fill(x, y, x + 1, y + 18, 0xFF07111F);
-        ctx.fill(x + 17, y, x + 18, y + 18, 0xFF3A5570);
-        ctx.fill(x, y + 17, x + 18, y + 18, 0xFF3A5570);
+    private static void drawCraftingItemSlot(GuiGraphicsExtractor ctx, int x, int y) {
+        GatherTheme.fill(ctx, x, y, x + 18, y + 18, 0xFF162335);
+        GatherTheme.fill(ctx, x, y, x + 18, y + 1, 0xFF07111F);
+        GatherTheme.fill(ctx, x, y, x + 1, y + 18, 0xFF07111F);
+        GatherTheme.fill(ctx, x + 17, y, x + 18, y + 18, 0xFF3A5570);
+        GatherTheme.fill(ctx, x, y + 17, x + 18, y + 18, 0xFF3A5570);
     }
 
     private static final Identifier SHULKER_TEX =
-        Identifier.of("minecraft", "textures/gui/container/shulker_box.png");
+        Identifier.fromNamespaceAndPath("minecraft", "textures/gui/container/shulker_box.png");
 
     // ── Shulker collector mockup ─────────────────────────────────────────────
 
-    private void drawShulkerMockup(DrawContext ctx) {
-        ctx.fill(0, 0, width, height, 0x80000000);
+    private void drawShulkerMockup(GuiGraphicsExtractor ctx) {
+        GatherTheme.fill(ctx, 0, 0, width, height, 0x80000000);
 
         int bgW = 176, bgH = 166;
         int bgX = width / 2 - bgW / 2;
         int bgY = height / 2 - bgH / 2;
 
-        ctx.drawTexture(RenderPipelines.GUI_TEXTURED, SHULKER_TEX,
+        ctx.blit(RenderPipelines.GUI_TEXTURED, SHULKER_TEX,
                 bgX, bgY, 0, 0, bgW, bgH, 256, 256);
 
         int BUTTON_W = 100, BUTTON_H = 14;
@@ -523,51 +524,51 @@ public class GatherTutorialScreen extends Screen {
 
         for (int i = 0; i < 3; i++) {
             int by = btn0Y + i * (BUTTON_H + 3);
-            ctx.fill(btnX,            by, btnX + BUTTON_W, by + BUTTON_H, 0xBB004433);
-            ctx.fill(btnX,            by, btnX + BUTTON_W, by + 1,        0xFF33DDAA);
-            ctx.fill(btnX, by + BUTTON_H - 1, btnX + BUTTON_W, by + BUTTON_H, 0x66111122);
-            ctx.drawTextWithShadow(textRenderer, Text.literal(buttons[i][0]),
+            GatherTheme.fill(ctx, btnX,            by, btnX + BUTTON_W, by + BUTTON_H, 0xBB004433);
+            GatherTheme.fill(ctx, btnX,            by, btnX + BUTTON_W, by + 1,        0xFF33DDAA);
+            GatherTheme.fill(ctx, btnX, by + BUTTON_H - 1, btnX + BUTTON_W, by + BUTTON_H, 0x66111122);
+            ctx.text(font, Component.literal(buttons[i][0]),
                     btnX + 5, by + 3, 0xFF66FFD6);
         }
     }
 
-    private static void drawSlot(DrawContext ctx, int x, int y, int size) {
-        ctx.fill(x,    y,    x+size,   y+size,   0xFF8B8B8B);
-        ctx.fill(x,    y,    x+size-1, y+1,      0xFF373737);
-        ctx.fill(x,    y,    x+1,      y+size-1, 0xFF373737);
-        ctx.fill(x+1,  y+1,  x+size-1, y+size-1, 0xFF8B8B8B);
+    private static void drawSlot(GuiGraphicsExtractor ctx, int x, int y, int size) {
+        GatherTheme.fill(ctx, x,    y,    x+size,   y+size,   0xFF8B8B8B);
+        GatherTheme.fill(ctx, x,    y,    x+size-1, y+1,      0xFF373737);
+        GatherTheme.fill(ctx, x,    y,    x+1,      y+size-1, 0xFF373737);
+        GatherTheme.fill(ctx, x+1,  y+1,  x+size-1, y+size-1, 0xFF8B8B8B);
     }
 
     // ── Info card ────────────────────────────────────────────────────────────
 
-    private void drawCard(DrawContext ctx, Step s, int mx, int my,
+    private void drawCard(GuiGraphicsExtractor ctx, Step s, int mx, int my,
                           int cardX, int cardY, int cardW, int cardH) {
         int cx     = cardX + cardW / 2;
         int innerW = cardW - 16;
 
         // Bottom shadow
-        ctx.fill(cardX + 3, cardY + cardH,     cardX + cardW,     cardY + cardH + 1, 0x50000000);
-        ctx.fill(cardX + 4, cardY + cardH + 1, cardX + cardW - 1, cardY + cardH + 2, 0x30000000);
-        ctx.fill(cardX + 5, cardY + cardH + 2, cardX + cardW - 2, cardY + cardH + 3, 0x18000000);
+        GatherTheme.fill(ctx, cardX + 3, cardY + cardH,     cardX + cardW,     cardY + cardH + 1, 0x50000000);
+        GatherTheme.fill(ctx, cardX + 4, cardY + cardH + 1, cardX + cardW - 1, cardY + cardH + 2, 0x30000000);
+        GatherTheme.fill(ctx, cardX + 5, cardY + cardH + 2, cardX + cardW - 2, cardY + cardH + 3, 0x18000000);
 
-        ctx.fill(cardX,           cardY,           cardX + cardW, cardY + cardH, 0xFF0A1020);
-        ctx.fill(cardX,           cardY,           cardX + cardW, cardY + 1,     0xFF2255AA);
-        ctx.fill(cardX,           cardY + cardH-1, cardX + cardW, cardY + cardH, 0xFF112244);
-        ctx.fill(cardX,           cardY,           cardX + 1,     cardY + cardH, 0xFF2255AA);
-        ctx.fill(cardX + cardW-1, cardY,           cardX + cardW, cardY + cardH, 0xFF2255AA);
+        GatherTheme.fill(ctx, cardX,           cardY,           cardX + cardW, cardY + cardH, 0xFF0A1020);
+        GatherTheme.fill(ctx, cardX,           cardY,           cardX + cardW, cardY + 1,     0xFF2255AA);
+        GatherTheme.fill(ctx, cardX,           cardY + cardH-1, cardX + cardW, cardY + cardH, 0xFF112244);
+        GatherTheme.fill(ctx, cardX,           cardY,           cardX + 1,     cardY + cardH, 0xFF2255AA);
+        GatherTheme.fill(ctx, cardX + cardW-1, cardY,           cardX + cardW, cardY + cardH, 0xFF2255AA);
 
-        ctx.drawTextWithShadow(textRenderer,
-                Text.literal((step + 1) + " / " + STEPS.length),
+        ctx.text(font,
+                Component.literal((step + 1) + " / " + STEPS.length),
                 cardX + 8, cardY + 8, 0xFF334466);
-        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(s.title()), cx, cardY + 8, 0xFF88CCFF);
-        ctx.fill(cardX + 10, cardY + 19, cardX + cardW - 10, cardY + 20, 0x33336699);
+        ctx.centeredText(font, Component.literal(s.title()), cx, cardY + 8, 0xFF88CCFF);
+        GatherTheme.fill(ctx, cardX + 10, cardY + 19, cardX + cardW - 10, cardY + 20, 0x33336699);
 
         int lineY = cardY + 24;
         for (String line : s.lines()) {
-            List<OrderedText> wrapped = textRenderer.wrapLines(Text.literal(line), innerW);
-            for (OrderedText ot : wrapped) {
-                int tw = textRenderer.getWidth(ot);
-                ctx.drawTextWithShadow(textRenderer, ot, cx - tw / 2, lineY, 0xFFAABBCC);
+            List<FormattedCharSequence> wrapped = font.split(Component.literal(line), innerW);
+            for (FormattedCharSequence ot : wrapped) {
+                int tw = font.width(ot);
+                ctx.text(font, ot, cx - tw / 2, lineY, 0xFFAABBCC);
                 lineY += 11;
             }
         }
@@ -575,7 +576,7 @@ public class GatherTutorialScreen extends Screen {
         drawNav(ctx, mx, my, cardX, cardW, cardY + cardH - 22);
     }
 
-    private void drawNav(DrawContext ctx, int mx, int my, int cardX, int cardW, int navY) {
+    private void drawNav(GuiGraphicsExtractor ctx, int mx, int my, int cardX, int cardW, int navY) {
         int cx      = cardX + cardW / 2;
         boolean hasPrev = step > 0;
         boolean isLast  = step == STEPS.length - 1;
@@ -583,9 +584,9 @@ public class GatherTutorialScreen extends Screen {
         if (hasPrev) {
             int bx = cardX + 10;
             boolean hov = hit(mx, my, bx, navY, NAV_BTN_W, NAV_BTN_H);
-            ctx.fill(bx, navY, bx + NAV_BTN_W, navY + NAV_BTN_H, hov ? 0xFF223355 : 0xFF162035);
-            ctx.fill(bx, navY, bx + NAV_BTN_W, navY + 1, 0xFF334466);
-            ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("← Prev"),
+            GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + NAV_BTN_H, hov ? 0xFF223355 : 0xFF162035);
+            GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + 1, 0xFF334466);
+            ctx.centeredText(font, Component.literal("← Prev"),
                     bx + NAV_BTN_W / 2, navY + 4, hov ? 0xFFCCDDFF : 0xFF778899);
         }
 
@@ -593,10 +594,10 @@ public class GatherTutorialScreen extends Screen {
             int bx = cx - NAV_BTN_W / 2;
             boolean hov = hit(mx, my, bx, navY, NAV_BTN_W, NAV_BTN_H);
             String label = isLast ? "Done" : "Next →";
-            ctx.fill(bx, navY, bx + NAV_BTN_W, navY + NAV_BTN_H,
+            GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + NAV_BTN_H,
                     hov ? (isLast ? 0xFF004D42 : 0xFF223355) : (isLast ? 0xFF003D34 : 0xFF162035));
-            ctx.fill(bx, navY, bx + NAV_BTN_W, navY + 1, isLast ? 0xFF00CC99 : 0xFF334466);
-            ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(label),
+            GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + 1, isLast ? 0xFF00CC99 : 0xFF334466);
+            ctx.centeredText(font, Component.literal(label),
                     bx + NAV_BTN_W / 2, navY + 4,
                     hov ? 0xFFFFFFFF : (isLast ? 0xFF33D6AA : 0xFFCCDDFF));
         }
@@ -604,9 +605,9 @@ public class GatherTutorialScreen extends Screen {
         if (!isLast) {
             int bx = cardX + cardW - NAV_BTN_W - 10;
             boolean hov = hit(mx, my, bx, navY, NAV_BTN_W, NAV_BTN_H);
-            ctx.fill(bx, navY, bx + NAV_BTN_W, navY + NAV_BTN_H, hov ? 0xFF221133 : 0xFF120A1A);
-            ctx.fill(bx, navY, bx + NAV_BTN_W, navY + 1, 0xFF442255);
-            ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("Skip All"),
+            GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + NAV_BTN_H, hov ? 0xFF221133 : 0xFF120A1A);
+            GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + 1, 0xFF442255);
+            ctx.centeredText(font, Component.literal("Skip All"),
                     bx + NAV_BTN_W / 2, navY + 4, hov ? 0xFFCC88FF : 0xFF664488);
         }
     }
@@ -614,7 +615,7 @@ public class GatherTutorialScreen extends Screen {
     // ── Input ────────────────────────────────────────────────────────────────
 
     @Override
-    public boolean mouseClicked(Click click, boolean focused) {
+    public boolean mouseClicked(MouseButtonEvent click, boolean focused) {
         if (click.button() != 0) return false;
         double mx = click.x(), my = click.y();
         int navY    = renderedCardY + renderedCardH - 22;
@@ -634,7 +635,7 @@ public class GatherTutorialScreen extends Screen {
     }
 
     @Override
-    public boolean keyPressed(KeyInput input) {
+    public boolean keyPressed(KeyEvent input) {
         int key = input.key();
         if (key == GLFW.GLFW_KEY_RIGHT || key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_SPACE) {
             goTo(step + 1); return true;
@@ -649,5 +650,5 @@ public class GatherTutorialScreen extends Screen {
     }
 
     @Override
-    public void close() { finish(); }
+    public void onClose() { finish(); }
 }

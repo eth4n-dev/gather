@@ -1,22 +1,22 @@
 package com.gather.network;
 
 import com.gather.GatherMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public record AutoTrackResultPayload(List<Long> positions) implements CustomPayload {
+public record AutoTrackResultPayload(List<Long> positions) implements CustomPacketPayload {
 
-    public static final Id<AutoTrackResultPayload> ID =
-            new Id<>(Identifier.of(GatherMod.MOD_ID, "auto_track_result"));
+    public static final CustomPacketPayload.Type<AutoTrackResultPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(GatherMod.MOD_ID, "auto_track_result"));
 
-    public static final PacketCodec<RegistryByteBuf, AutoTrackResultPayload> CODEC =
-            PacketCodec.of(
-                    (v, buf) -> {
+    public static final StreamCodec<RegistryFriendlyByteBuf, AutoTrackResultPayload> CODEC =
+            StreamCodec.of(
+                    (buf, v) -> {
                         buf.writeInt(v.positions().size());
                         for (long pos : v.positions()) buf.writeLong(pos);
                     },
@@ -29,5 +29,5 @@ public record AutoTrackResultPayload(List<Long> positions) implements CustomPayl
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() { return ID; }
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return ID; }
 }

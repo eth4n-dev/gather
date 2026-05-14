@@ -1,22 +1,22 @@
 package com.gather.network;
 
 import com.gather.GatherMod;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
-import net.minecraft.util.Identifier;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
-public record ChestDirtyPayload(long posLong) implements CustomPayload {
+public record ChestDirtyPayload(long posLong) implements CustomPacketPayload {
 
-    public static final Id<ChestDirtyPayload> ID =
-            new Id<>(Identifier.of(GatherMod.MOD_ID, "chest_dirty"));
+    public static final CustomPacketPayload.Type<ChestDirtyPayload> ID =
+            new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath(GatherMod.MOD_ID, "chest_dirty"));
 
-    public static final PacketCodec<RegistryByteBuf, ChestDirtyPayload> CODEC =
-            PacketCodec.of(
-                    (v, buf) -> buf.writeLong(v.posLong()),
+    public static final StreamCodec<RegistryFriendlyByteBuf, ChestDirtyPayload> CODEC =
+            StreamCodec.of(
+                    (buf, v) -> buf.writeLong(v.posLong()),
                     buf -> new ChestDirtyPayload(buf.readLong())
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() { return ID; }
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() { return ID; }
 }

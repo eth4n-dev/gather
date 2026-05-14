@@ -31,9 +31,9 @@ public class GatherClientNetworking {
             if (!GatherSettings.get().enabled) return;
             context.client().execute(() -> {
                 GatherState state = GatherState.get();
-                if (context.client().world != null && context.client().player != null) {
-                    state.mergeAutoTrackedChests(payload.positions(), context.client().world,
-                            context.client().player.getBlockPos(), GatherSettings.get().chestScanRadius);
+                if (context.client().level != null && context.client().player != null) {
+                    state.mergeAutoTrackedChests(payload.positions(), context.client().level,
+                            context.client().player.blockPosition(), GatherSettings.get().chestScanRadius);
                 } else {
                     state.addTrackedChests(payload.positions());
                 }

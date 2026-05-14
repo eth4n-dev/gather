@@ -3,11 +3,11 @@ package com.gather.client;
 import com.google.gson.*;
 import com.google.gson.reflect.TypeToken;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.item.Item;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.core.BlockPos;
 
 import java.io.*;
 import java.lang.reflect.Type;
@@ -83,9 +83,9 @@ public class GatherState {
 
     // ─── WORLD MANAGEMENT ────────────────────────────────────────────────────
 
-    public static void loadForWorld(net.minecraft.client.MinecraftClient client) {
+    public static void loadForWorld(net.minecraft.client.Minecraft minecraft) {
         if (instance != null) instance.flushSaveNow();
-        currentWorldId = deriveWorldId(client);
+        currentWorldId = deriveWorldId(minecraft);
         instance = load();
         loadHiddenBaseMaterials(instance);
         loadTrackedChests(instance);
@@ -111,18 +111,18 @@ public class GatherState {
 
     public static String getCurrentWorldId() { return currentWorldId; }
 
-    public static String deriveWorldId(net.minecraft.client.MinecraftClient client) {
-        if (client.getServer() != null) {
+    public static String deriveWorldId(net.minecraft.client.Minecraft minecraft) {
+        if (minecraft.getSingleplayerServer() != null) {
             // Use world folder name — unique per world (MC appends "(2)", "(3)" etc for duplicates).
             // getLevelName() returns the display name, which is NOT unique across worlds.
-            java.nio.file.Path root = client.getServer()
-                    .getSavePath(net.minecraft.util.WorldSavePath.ROOT)
+            java.nio.file.Path root = minecraft.getSingleplayerServer()
+                    .getServerDirectory()
                     .normalize();
             java.nio.file.Path folder = root.getFileName();
             String name = (folder != null ? folder : root).toString();
             return "sp_" + sanitizeId(name);
-        } else if (client.getCurrentServerEntry() != null) {
-            return "mp_" + sanitizeId(client.getCurrentServerEntry().address);
+        } else if (minecraft.getCurrentServer() != null) {
+            return "mp_" + sanitizeId(minecraft.getCurrentServer().ip);
         }
         return "default";
     }
@@ -474,7 +474,7 @@ public class GatherState {
     public boolean isNeeded(Item item) {
         Boolean cached = neededItemCache.get(item);
         if (cached != null) return cached;
-        String id = Registries.ITEM.getId(item).toString();
+        String id = BuiltInRegistries.ITEM.getKey(item).toString();
         if (isBaseMaterialHidden(id)) return false;
         if (effectivelyNeededIds.contains(id)) {
             neededItemCache.put(item, true);
@@ -606,6 +606,7 @@ public class GatherState {
         for (int ni = 0; ni < nodes.size(); ni++) {
             ListNode root = nodes.get(ni);
             if (root.depth != 0) continue;
+            if (isBaseMaterialHidden(root.itemId)) continue;
 
             if (!root.broken) {
                 int have = counter.apply(root.itemId);
@@ -903,16 +904,16 @@ public class GatherState {
         saveTrackedChestContents();
     }
 
-    public void mergeAutoTrackedChests(List<Long> positions, ClientWorld world, BlockPos center, int radius) {
+    public void mergeAutoTrackedChests(List<Long> positions, ClientLevel world, BlockPos center, int radius) {
         Set<Long> found = new LinkedHashSet<>(positions);
         boolean changed = trackedChests.addAll(found);
         Iterator<Long> iterator = trackedChests.iterator();
         while (iterator.hasNext()) {
             long encoded = iterator.next();
             if (found.contains(encoded)) continue;
-            BlockPos pos = BlockPos.fromLong(encoded);
+            BlockPos pos = BlockPos.of(encoded);
             if (!isWithinScanRadius(pos, center, radius)) continue;
-            if (!world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) continue;
+            if (!world.getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) continue;
             iterator.remove();
             trackedChestContents.remove(encoded);
             changed = true;
@@ -985,15 +986,15 @@ public class GatherState {
     private static final Map<String, Set<String>> EXPECTED_TAG_PATHS_CACHE = new HashMap<>();
 
     private static Item cachedItem(String itemId) {
-        return ITEM_LOOKUP_CACHE.computeIfAbsent(itemId, id -> Registries.ITEM.get(Identifier.of(id)));
+        return ITEM_LOOKUP_CACHE.computeIfAbsent(itemId, id -> BuiltInRegistries.ITEM.getValue(Identifier.parse(id)));
     }
 
     private static Set<String> cachedTagPaths(String itemId) {
         return ITEM_TAG_PATH_CACHE.computeIfAbsent(itemId, id -> {
             Item item = cachedItem(id);
             if (item == null) return Set.of();
-            return item.getRegistryEntry().streamTags()
-                    .map(tag -> tag.id().getPath())
+            return item.builtInRegistryHolder().tags()
+                    .map(tag -> tag.location().getPath())
                     .collect(Collectors.toSet());
         });
     }
@@ -1190,11 +1191,11 @@ public class GatherState {
         } catch (IOException | RuntimeException ignored) {}
     }
 
-    public int getUnloadedTrackedChestCount(net.minecraft.client.world.ClientWorld world) {
+    public int getUnloadedTrackedChestCount(net.minecraft.client.multiplayer.ClientLevel world) {
         int unloaded = 0;
         for (long encoded : trackedChests) {
-            BlockPos pos = BlockPos.fromLong(encoded);
-            if (!world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) unloaded++;
+            BlockPos pos = BlockPos.of(encoded);
+            if (!world.getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) unloaded++;
         }
         return unloaded;
     }

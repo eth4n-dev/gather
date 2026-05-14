@@ -1,15 +1,16 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherKeyBindings;
 import com.gather.client.GatherSettings;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.text.Text;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.KeyMapping;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 public class GatherScanKeybindScreen extends Screen {
@@ -22,14 +23,14 @@ public class GatherScanKeybindScreen extends Screen {
     private boolean capturingMenuKey = false;
     private boolean capturingManualKey = false;
 
-    private ButtonWidget shiftBtn;
-    private ButtonWidget ctrlBtn;
-    private ButtonWidget altBtn;
-    private ButtonWidget menuKeyBtn;
-    private ButtonWidget manualKeyBtn;
+    private Button shiftBtn;
+    private Button ctrlBtn;
+    private Button altBtn;
+    private Button menuKeyBtn;
+    private Button manualKeyBtn;
 
     public GatherScanKeybindScreen(Screen parent) {
-        super(Text.literal("Gather Controls"));
+        super(Component.literal("Gather Controls"));
         this.parent = parent;
         GatherSettings s = GatherSettings.get();
         this.pendingShift = s.scanToggleShift;
@@ -42,61 +43,61 @@ public class GatherScanKeybindScreen extends Screen {
         int cx = width / 2;
         int cy = height / 2;
 
-        menuKeyBtn = ButtonWidget.builder(menuKeyLabel(), btn -> {
+        menuKeyBtn = Button.builder(menuKeyLabel(), btn -> {
             capturingMenuKey = true;
-            btn.setMessage(Text.literal("Press any key..."));
-        }).dimensions(cx - 100, cy - 48, 200, 20).build();
-        addDrawableChild(menuKeyBtn);
+            btn.setMessage(Component.literal("Press any key..."));
+        }).bounds(cx - 100, cy - 48, 200, 20).build();
+        addRenderableWidget(menuKeyBtn);
 
-        manualKeyBtn = ButtonWidget.builder(manualKeyLabel(), btn -> {
+        manualKeyBtn = Button.builder(manualKeyLabel(), btn -> {
             capturingManualKey = true;
-            btn.setMessage(Text.literal("Press any key..."));
-        }).dimensions(cx - 100, cy - 18, 200, 20).build();
-        addDrawableChild(manualKeyBtn);
+            btn.setMessage(Component.literal("Press any key..."));
+        }).bounds(cx - 100, cy - 18, 200, 20).build();
+        addRenderableWidget(manualKeyBtn);
 
-        shiftBtn = ButtonWidget.builder(modLabel("Shift", pendingShift), btn -> {
+        shiftBtn = Button.builder(modLabel("Shift", pendingShift), btn -> {
             pendingShift = !pendingShift;
             btn.setMessage(modLabel("Shift", pendingShift));
-        }).dimensions(cx - 100, cy + 26, 60, 20).build();
-        addDrawableChild(shiftBtn);
+        }).bounds(cx - 100, cy + 26, 60, 20).build();
+        addRenderableWidget(shiftBtn);
 
-        ctrlBtn = ButtonWidget.builder(modLabel("Ctrl", pendingCtrl), btn -> {
+        ctrlBtn = Button.builder(modLabel("Ctrl", pendingCtrl), btn -> {
             pendingCtrl = !pendingCtrl;
             btn.setMessage(modLabel("Ctrl", pendingCtrl));
-        }).dimensions(cx - 35, cy + 26, 60, 20).build();
-        addDrawableChild(ctrlBtn);
+        }).bounds(cx - 35, cy + 26, 60, 20).build();
+        addRenderableWidget(ctrlBtn);
 
-        altBtn = ButtonWidget.builder(modLabel("Alt", pendingAlt), btn -> {
+        altBtn = Button.builder(modLabel("Alt", pendingAlt), btn -> {
             pendingAlt = !pendingAlt;
             btn.setMessage(modLabel("Alt", pendingAlt));
-        }).dimensions(cx + 30, cy + 26, 60, 20).build();
-        addDrawableChild(altBtn);
+        }).bounds(cx + 30, cy + 26, 60, 20).build();
+        addRenderableWidget(altBtn);
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Clear modifiers"), btn -> {
+        addRenderableWidget(Button.builder(Component.literal("Clear modifiers"), btn -> {
             pendingShift = false;
             pendingCtrl  = false;
             pendingAlt   = false;
             shiftBtn.setMessage(modLabel("Shift", pendingShift));
             ctrlBtn .setMessage(modLabel("Ctrl",  pendingCtrl));
             altBtn  .setMessage(modLabel("Alt",   pendingAlt));
-        }).dimensions(cx - 100, cy + 58, 95, 20).build());
+        }).bounds(cx - 100, cy + 58, 95, 20).build());
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Done"), btn -> save())
-                .dimensions(cx + 5, cy + 58, 95, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("Done"), btn -> save())
+                .bounds(cx + 5, cy + 58, 95, 20).build());
     }
 
-    private Text modLabel(String name, boolean active) {
-        return Text.literal(active ? "§a[" + name + "]" : name);
+    private Component modLabel(String name, boolean active) {
+        return Component.literal(active ? "§a[" + name + "]" : name);
     }
 
-    private Text menuKeyLabel() {
-        InputUtil.Key key = KeyBindingHelper.getBoundKeyOf(GatherKeyBindings.openMenu);
-        return Text.literal("Menu Key: " + key.getLocalizedText().getString());
+    private Component menuKeyLabel() {
+        InputConstants.Key key = KeyMappingHelper.getBoundKeyOf(GatherKeyBindings.openMenu);
+        return Component.literal("Menu Key: " + key.getDisplayName().getString());
     }
 
-    private Text manualKeyLabel() {
-        InputUtil.Key key = KeyBindingHelper.getBoundKeyOf(GatherKeyBindings.manualScanToggle);
-        return Text.literal("Manual Scan Key: " + key.getLocalizedText().getString());
+    private Component manualKeyLabel() {
+        InputConstants.Key key = KeyMappingHelper.getBoundKeyOf(GatherKeyBindings.manualScanToggle);
+        return Component.literal("Manual Scan Key: " + key.getDisplayName().getString());
     }
 
     static String buildComboLabel(GatherSettings s) {
@@ -104,31 +105,31 @@ public class GatherScanKeybindScreen extends Screen {
         if (s.scanToggleCtrl)  sb.append("Ctrl+");
         if (s.scanToggleAlt)   sb.append("Alt+");
         if (s.scanToggleShift) sb.append("Shift+");
-        InputUtil.Key key = KeyBindingHelper.getBoundKeyOf(GatherKeyBindings.manualScanToggle);
-        sb.append(key.getLocalizedText().getString());
+        InputConstants.Key key = KeyMappingHelper.getBoundKeyOf(GatherKeyBindings.manualScanToggle);
+        sb.append(key.getDisplayName().getString());
         return sb.toString();
     }
 
     @Override
-    public boolean keyPressed(KeyInput input) {
+    public boolean keyPressed(KeyEvent input) {
         if (capturingMenuKey || capturingManualKey) {
             int keyCode = input.key();
-            KeyBinding binding = capturingMenuKey ? GatherKeyBindings.openMenu : GatherKeyBindings.manualScanToggle;
+            KeyMapping binding = capturingMenuKey ? GatherKeyBindings.openMenu : GatherKeyBindings.manualScanToggle;
             int fallback = capturingMenuKey ? GLFW.GLFW_KEY_G : GLFW.GLFW_KEY_V;
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-                binding.setBoundKey(InputUtil.Type.KEYSYM.createFromCode(fallback));
+                binding.setKey(InputConstants.Type.KEYSYM.getOrCreate(fallback));
             } else {
-                binding.setBoundKey(InputUtil.Type.KEYSYM.createFromCode(keyCode));
+                binding.setKey(InputConstants.Type.KEYSYM.getOrCreate(keyCode));
             }
-            KeyBinding.updateKeysByCode();
-            client.options.write();
+            KeyMapping.resetMapping();
+            minecraft.options.save();
             capturingMenuKey = false;
             capturingManualKey = false;
             menuKeyBtn.setMessage(menuKeyLabel());
             manualKeyBtn.setMessage(manualKeyLabel());
             return true;
         }
-        if (input.key() == GLFW.GLFW_KEY_ESCAPE) { close(); return true; }
+        if (input.key() == GLFW.GLFW_KEY_ESCAPE) { onClose(); return true; }
         return super.keyPressed(input);
     }
 
@@ -138,37 +139,37 @@ public class GatherScanKeybindScreen extends Screen {
         s.scanToggleCtrl  = pendingCtrl;
         s.scanToggleAlt   = pendingAlt;
         s.save();
-        close();
+        onClose();
     }
 
     @Override
-    public void render(DrawContext ctx, int mx, int my, float delta) {
-        ctx.fill(0, 0, width, height, 0xCC111122);
+    public void extractRenderState(GuiGraphicsExtractor ctx, int mx, int my, float delta) {
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
         int cx = width / 2;
         int cy = height / 2;
-        ctx.drawCenteredTextWithShadow(textRenderer, title, cx, cy - 95, 0xFFCCDDFF);
-        ctx.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("Menu opens and closes with the menu key or E."),
+        ctx.centeredText(font, title, cx, cy - 95, 0xFFCCDDFF);
+        ctx.centeredText(font,
+                Component.literal("Menu opens and closes with the menu key or E."),
                 cx, cy - 78, 0xFF667788);
-        ctx.drawCenteredTextWithShadow(textRenderer,
-                Text.literal("Manual scan uses its own key plus optional modifiers."),
+        ctx.centeredText(font,
+                Component.literal("Manual scan uses its own key plus optional modifiers."),
                 cx, cy - 66, 0xFF667788);
 
         // Live preview
-        InputUtil.Key key = KeyBindingHelper.getBoundKeyOf(GatherKeyBindings.manualScanToggle);
-        String keyName = key.getLocalizedText().getString();
+        InputConstants.Key key = KeyMappingHelper.getBoundKeyOf(GatherKeyBindings.manualScanToggle);
+        String keyName = key.getDisplayName().getString();
         StringBuilder live = new StringBuilder();
         if (pendingCtrl)  live.append("Ctrl+");
         if (pendingAlt)   live.append("Alt+");
         if (pendingShift) live.append("Shift+");
         live.append(capturingManualKey ? "..." : keyName);
-        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("Manual scan: " + live), cx, cy + 7, 0xFFAAFF88);
+        ctx.centeredText(font, Component.literal("Manual scan: " + live), cx, cy + 7, 0xFFAAFF88);
 
-        super.render(ctx, mx, my, delta);
+        super.extractRenderState(ctx, mx, my, delta);
     }
 
     @Override
-    public void close() {
-        client.setScreen(parent);
+    public void onClose() {
+        minecraft.setScreen(parent);
     }
 }

@@ -1,17 +1,18 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherState;
 import com.gather.client.GatherUi;
 import com.gather.client.ListNode;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.item.Item;
-import net.minecraft.registry.Registries;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.world.item.Item;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 
 import java.util.*;
 
@@ -33,14 +34,14 @@ public class GatherChestFinderScreen extends Screen {
     private boolean onlyNeeded     = false;
     private String  searchQuery    = "";
 
-    private TextFieldWidget searchField;
-    private ButtonWidget    onlyNeededBtn;
+    private EditBox searchField;
+    private Button    onlyNeededBtn;
 
     // Scrollbar drag state
     private boolean draggingScrollbar = false;
 
     public GatherChestFinderScreen(Screen parent) {
-        super(Text.literal("Find Item in Chest"));
+        super(Component.literal("Find Item in Chest"));
         this.parent = parent;
     }
 
@@ -51,46 +52,46 @@ public class GatherChestFinderScreen extends Screen {
 
         // Search field (left part of header row)
         int searchW = LIST_W - 86;
-        searchField = new TextFieldWidget(textRenderer, listX, HEADER_H - 22, searchW, 16,
-                Text.literal("Search..."));
-        searchField.setPlaceholder(Text.literal("Search..."));
+        searchField = new EditBox(font, listX, HEADER_H - 22, searchW, 16,
+                Component.literal("Search..."));
+        searchField.setHint(Component.literal("Search..."));
         searchField.setMaxLength(64);
-        searchField.setChangedListener(q -> { searchQuery = q; rebuildShown(); });
-        addSelectableChild(searchField);
+        searchField.setResponder(q -> { searchQuery = q; rebuildShown(); });
+        addWidget(searchField);
         setFocused(searchField);
 
         // Only Needed toggle (right part of header row)
-        onlyNeededBtn = ButtonWidget.builder(onlyNeededLabel(), btn -> {
+        onlyNeededBtn = Button.builder(onlyNeededLabel(), btn -> {
             onlyNeeded = !onlyNeeded;
             btn.setMessage(onlyNeededLabel());
             rebuildShown();
-        }).dimensions(listX + searchW + 4, HEADER_H - 22, 80, 16).build();
-        addDrawableChild(onlyNeededBtn);
+        }).bounds(listX + searchW + 4, HEADER_H - 22, 80, 16).build();
+        addRenderableWidget(onlyNeededBtn);
 
         // Bottom buttons
         int bottomY = height - FOOTER_H + 6;
-        addDrawableChild(ButtonWidget.builder(Text.literal("Clear Finder"), btn -> {
+        addRenderableWidget(Button.builder(Component.literal("Clear Finder"), btn -> {
             GatherState.get().setChestFinderItemId(null);
-            close();
-        }).dimensions(cx - 102, bottomY, 98, 20).build());
+            onClose();
+        }).bounds(cx - 102, bottomY, 98, 20).build());
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Done"), btn -> close())
-                .dimensions(cx + 4, bottomY, 98, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("Done"), btn -> onClose())
+                .bounds(cx + 4, bottomY, 98, 20).build());
 
         buildAllEntries();
         rebuildShown();
     }
 
-    private Text onlyNeededLabel() {
-        return Text.literal(onlyNeeded ? "Needed only" : "Any item");
+    private Component onlyNeededLabel() {
+        return Component.literal(onlyNeeded ? "Needed only" : "Any item");
     }
 
     private void buildAllEntries() {
         allEntries.clear();
         Map<String, Integer> allItems = GatherState.get().getAllChestItems();
         for (Map.Entry<String, Integer> e : allItems.entrySet()) {
-            Item item = Registries.ITEM.get(Identifier.of(e.getKey()));
-            String name = item != null ? item.getName().getString() : e.getKey();
+            Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(e.getKey()));
+            String name = item != null ? com.gather.client.GatherUi.itemName(item).getString() : e.getKey();
             allEntries.add(new ItemEntry(e.getKey(), name, e.getValue()));
         }
         allEntries.sort(Comparator.comparingInt(ItemEntry::totalCount).reversed());
@@ -141,7 +142,7 @@ public class GatherChestFinderScreen extends Screen {
     }
 
     @Override
-    public boolean mouseClicked(Click click, boolean focused) {
+    public boolean mouseClicked(MouseButtonEvent click, boolean focused) {
         int mx = (int) click.x(), my = (int) click.y();
         int lx = listX();
         int scrollX = lx + LIST_W + 3;
@@ -162,7 +163,7 @@ public class GatherChestFinderScreen extends Screen {
             if (row >= 0 && row < shown.size()) {
                 GatherUi.playClickSound();
                 GatherState.get().setChestFinderItemId(shown.get(row).itemId());
-                close();
+                onClose();
                 return true;
             }
         }
@@ -171,13 +172,13 @@ public class GatherChestFinderScreen extends Screen {
     }
 
     @Override
-    public boolean mouseDragged(Click click, double deltaX, double deltaY) {
+    public boolean mouseDragged(MouseButtonEvent click, double deltaX, double deltaY) {
         if (draggingScrollbar) { applyScrollbarDrag((int) click.y()); return true; }
         return super.mouseDragged(click, deltaX, deltaY);
     }
 
     @Override
-    public boolean mouseReleased(Click click) {
+    public boolean mouseReleased(MouseButtonEvent click) {
         draggingScrollbar = false;
         return super.mouseReleased(click);
     }
@@ -198,29 +199,29 @@ public class GatherChestFinderScreen extends Screen {
     // ── Render ───────────────────────────────────────────────────────────────
 
     @Override
-    public void render(DrawContext ctx, int mx, int my, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor ctx, int mx, int my, float delta) {
         int cx = width / 2;
         int lx = listX();
 
-        ctx.fill(0, 0, width, height, 0xCC111122);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
 
         // Title + active label
-        ctx.drawCenteredTextWithShadow(textRenderer, title, cx, 10, 0xFFCCDDFF);
+        ctx.centeredText(font, title, cx, 10, 0xFFCCDDFF);
         String current = GatherState.get().getChestFinderItemId();
         if (current != null) {
-            Item cur = Registries.ITEM.get(Identifier.of(current));
-            String curName = cur != null ? cur.getName().getString() : current;
-            ctx.drawCenteredTextWithShadow(textRenderer,
-                    Text.literal("Active: " + curName), cx, 22, 0xFFFF8888);
+            Item cur = BuiltInRegistries.ITEM.getValue(Identifier.parse(current));
+            String curName = cur != null ? com.gather.client.GatherUi.itemName(cur).getString() : current;
+            ctx.centeredText(font,
+                    Component.literal("Active: " + curName), cx, 22, 0xFFFF8888);
         }
 
         // Search field background
-        ctx.fill(lx - 1, listTop() - 23, lx + LIST_W - 83, listTop() - 3, 0xFF1A2A3A);
-        searchField.render(ctx, mx, my, delta);
+        GatherTheme.fill(ctx, lx - 1, listTop() - 23, lx + LIST_W - 83, listTop() - 3, 0xFF1A2A3A);
+        searchField.extractWidgetRenderState(ctx, mx, my, delta);
 
         // List border + background
-        ctx.fill(lx - 1, listTop() - 1, lx + LIST_W + 1, listBottom() + 1, 0xFF223344);
-        ctx.fill(lx, listTop(), lx + LIST_W, listBottom(), 0xFF0A1522);
+        GatherTheme.fill(ctx, lx - 1, listTop() - 1, lx + LIST_W + 1, listBottom() + 1, 0xFF223344);
+        GatherTheme.fill(ctx, lx, listTop(), lx + LIST_W, listBottom(), 0xFF0A1522);
 
         // Rows
         int visible = visibleRows();
@@ -232,46 +233,46 @@ public class GatherChestFinderScreen extends Screen {
             boolean hovered  = mx >= lx && mx < lx + LIST_W && my >= rowY && my < rowY + ROW_H;
             boolean selected = entry.itemId().equals(current);
 
-            ctx.fill(lx, rowY, lx + LIST_W, rowY + ROW_H - 1,
+            GatherTheme.fill(ctx, lx, rowY, lx + LIST_W, rowY + ROW_H - 1,
                     selected ? 0xFF3A0A0A : (hovered ? 0xFF1A2A3A : 0xFF0A1522));
             if (selected)
-                ctx.fill(lx, rowY, lx + 2, rowY + ROW_H - 1, 0xFFFF4444);
+                GatherTheme.fill(ctx, lx, rowY, lx + 2, rowY + ROW_H - 1, 0xFFFF4444);
 
-            Item item = Registries.ITEM.get(Identifier.of(entry.itemId()));
-            if (item != null) ctx.drawItem(item.getDefaultStack(), lx + 3, rowY + 3);
+            Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(entry.itemId()));
+            if (item != null) ctx.item(item.getDefaultInstance(), lx + 3, rowY + 3);
 
             int nameMaxW = LIST_W - 54;
             String name = entry.displayName();
-            while (textRenderer.getWidth(name) > nameMaxW && name.length() > 1)
+            while (font.width(name) > nameMaxW && name.length() > 1)
                 name = name.substring(0, name.length() - 1);
             if (!name.equals(entry.displayName())) name += "..";
 
-            ctx.drawTextWithShadow(textRenderer, Text.literal(name),
+            ctx.text(font, Component.literal(name),
                     lx + 24, rowY + 7,
                     selected ? 0xFFFF9999 : (hovered ? 0xFFEEEEEE : 0xFFCCCCCC));
 
             String countStr = "x" + entry.totalCount();
-            int cw = textRenderer.getWidth(countStr);
-            ctx.drawTextWithShadow(textRenderer, Text.literal(countStr),
+            int cw = font.width(countStr);
+            ctx.text(font, Component.literal(countStr),
                     lx + LIST_W - cw - 5, rowY + 7, 0xFF7799BB);
 
             // Row separator
-            ctx.fill(lx, rowY + ROW_H - 1, lx + LIST_W, rowY + ROW_H, 0xFF0E1A28);
+            GatherTheme.fill(ctx, lx, rowY + ROW_H - 1, lx + LIST_W, rowY + ROW_H, 0xFF0E1A28);
         }
 
         // Empty state
         if (shown.isEmpty()) {
             int emptyMidY = (listTop() + listBottom()) / 2;
             if (allEntries.isEmpty()) {
-                ctx.drawCenteredTextWithShadow(textRenderer,
-                        Text.literal("No items in scanned chests."),
+                ctx.centeredText(font,
+                        Component.literal("No items in scanned chests."),
                         cx, emptyMidY - 9, 0xFF556677);
-                ctx.drawCenteredTextWithShadow(textRenderer,
-                        Text.literal("Open chests or press Shift+G to tag them."),
+                ctx.centeredText(font,
+                        Component.literal("Open chests or press Shift+G to tag them."),
                         cx, emptyMidY + 3, 0xFF3A4A58);
             } else {
-                ctx.drawCenteredTextWithShadow(textRenderer,
-                        Text.literal("No matches."),
+                ctx.centeredText(font,
+                        Component.literal("No matches."),
                         cx, emptyMidY - 4, 0xFF556677);
             }
         }
@@ -283,16 +284,16 @@ public class GatherChestFinderScreen extends Screen {
             int thumbH  = Math.max(20, trackH * visible / shown.size());
             int maxScroll = Math.max(1, shown.size() - visible);
             int thumbY  = listTop() + (trackH - thumbH) * scrollOffset / maxScroll;
-            ctx.fill(scrollX, listTop(), scrollX + SCROLL_W, listBottom(), 0xFF0E1A28);
-            ctx.fill(scrollX + 1, thumbY + 1, scrollX + SCROLL_W - 1, thumbY + thumbH - 1,
+            GatherTheme.fill(ctx, scrollX, listTop(), scrollX + SCROLL_W, listBottom(), 0xFF0E1A28);
+            GatherTheme.fill(ctx, scrollX + 1, thumbY + 1, scrollX + SCROLL_W - 1, thumbY + thumbH - 1,
                     draggingScrollbar ? 0xFF99BBDD : 0xFF446688);
         }
 
-        super.render(ctx, mx, my, delta);
+        super.extractRenderState(ctx, mx, my, delta);
     }
 
     @Override
-    public void close() {
-        client.setScreen(parent);
+    public void onClose() {
+        minecraft.setScreen(parent);
     }
 }
