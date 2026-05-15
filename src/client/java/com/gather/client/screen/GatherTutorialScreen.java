@@ -252,7 +252,7 @@ public class GatherTutorialScreen extends Screen {
     private int targetCardX(int cw, Step s, int[] hl) {
         if (s.bg() == BgType.TRADE) {
             int merchantX = width / 2 - 88;
-            int x = Math.max(merchantX + 176 + 24, width - cw - 12);
+            int x = merchantX + 176 + 8;
             return Math.max(8, Math.min(width - cw - 8, x));
         }
         if (s.pos() == CardPos.CENTER) {
@@ -550,11 +550,7 @@ public class GatherTutorialScreen extends Screen {
         drawTradeRow(ctx, panelX + 5, panelY + 76, false,
                 Items.EMERALD.getDefaultInstance(), Items.ROTTEN_FLESH.getDefaultInstance(), Items.GOLDEN_APPLE.getDefaultInstance(),
                 "Golden Apple");
-        drawTradeRow(ctx, panelX + 5, panelY + 102, false,
-                Items.EMERALD.getDefaultInstance(), Items.PAPER.getDefaultInstance(), Items.BOOKSHELF.getDefaultInstance(),
-                "Bookshelf");
-
-        int detailTop = panelY + 126;
+        int detailTop = panelY + 100;
         ctx.text(font, Component.literal("Want"), panelX + 6, detailTop + 4, 0xFF8899AA);
         drawTradeAmountField(ctx, panelX + 45, detailTop + 1);
         ctx.text(font, Component.literal("64"), panelX + 104, detailTop + 4, 0xFFCCDDFF);

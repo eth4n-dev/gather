@@ -144,13 +144,11 @@ public class GatherMenuScreen extends Screen {
 
         addAmountField = new EditBox(font, 0, 0, 52, 14, Component.literal(""));
         addAmountField.setMaxLength(String.valueOf(MAX_WANTED_AMOUNT).length());
-        addAmountField.setFilter(GatherMenuScreen::isValidWantedAmountInput);
         addAmountField.setVisible(false);
         addWidget(addAmountField);
 
         editField = new EditBox(font, 0, 0, 60, 14, Component.literal(""));
         editField.setMaxLength(String.valueOf(MAX_WANTED_AMOUNT).length());
-        editField.setFilter(GatherMenuScreen::isValidWantedAmountInput);
         editField.setVisible(false);
         addWidget(editField);
 
