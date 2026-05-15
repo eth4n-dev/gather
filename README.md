@@ -30,7 +30,7 @@ Optional:
 
 1. Install Fabric Loader for Minecraft 1.21.11.
 2. Install Fabric API.
-3. Put `gather-1.3.1.jar` in your `mods` folder.
+3. Put `gather-1.21.11+1.1.0.jar` in your `mods` folder.
 4. Start Minecraft with the Fabric profile.
 
 ## License

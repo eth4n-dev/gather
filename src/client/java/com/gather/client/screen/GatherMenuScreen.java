@@ -34,6 +34,7 @@ public class GatherMenuScreen extends Screen {
     private static final long MENU_ZOOM_CLOSE_MS = 145L;
     private static final float MENU_CONTENT_REVEAL = 0.74f;
     private static final long COUNT_CACHE_MS = 250L;
+    private static final int MAX_WANTED_AMOUNT = 99999;
     private boolean suppressBottomBar = false;
 
     private static final int TAB_LIST   = 0;
@@ -140,14 +141,14 @@ public class GatherMenuScreen extends Screen {
         addSelectableChild(addSearch);
 
         addAmountField = new TextFieldWidget(textRenderer, 0, 0, 52, 14, Text.literal(""));
-        addAmountField.setMaxLength(7);
-        addAmountField.setTextPredicate(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
+        addAmountField.setMaxLength(String.valueOf(MAX_WANTED_AMOUNT).length());
+        addAmountField.setTextPredicate(s -> isValidWantedAmountInput(s));
         addAmountField.setVisible(false);
         addSelectableChild(addAmountField);
 
         editField = new TextFieldWidget(textRenderer, 0, 0, 60, 14, Text.literal(""));
-        editField.setMaxLength(7);
-        editField.setTextPredicate(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
+        editField.setMaxLength(String.valueOf(MAX_WANTED_AMOUNT).length());
+        editField.setTextPredicate(s -> isValidWantedAmountInput(s));
         editField.setVisible(false);
         addSelectableChild(editField);
 
@@ -1615,7 +1616,7 @@ public class GatherMenuScreen extends Screen {
             ListNode edited = nodes.get(editingIndex);
             try {
                 GatherState.get().setCount(editingList, editingIndex,
-                        Integer.parseInt(editField.getText().trim()));
+                        Math.min(MAX_WANTED_AMOUNT, Integer.parseInt(editField.getText().trim())));
                 if (edited.depth==0 && editingIndex<GatherState.get().getNodes(editingList).size())
                     refreshRootBreakdown(editingList, edited.itemId);
             } catch (NumberFormatException ignored) {}
@@ -1639,7 +1640,7 @@ public class GatherMenuScreen extends Screen {
         addFocusedItemId=null; addAmountField.setText(""); addAmountField.setVisible(false);
 
         if (n <= 0) return;
-        int count = Math.min(n, 9999999);
+        int count = Math.min(n, MAX_WANTED_AMOUNT);
 
         pendingAddItemId     = itemId;
         pendingAddCount      = count;
@@ -1648,6 +1649,16 @@ public class GatherMenuScreen extends Screen {
             executeAdd(0); // clears pending state internally
         }
         // else: picker overlay stays open until user clicks a list or presses Enter
+    }
+
+    private static boolean isValidWantedAmountInput(String value) {
+        if (value.isEmpty()) return true;
+        if (!value.chars().allMatch(Character::isDigit)) return false;
+        try {
+            return Integer.parseInt(value) <= MAX_WANTED_AMOUNT;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
     }
 
     private void executeAdd(int listIndex) {

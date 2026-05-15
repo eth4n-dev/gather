@@ -37,7 +37,7 @@ public class GatherTutorialScreen extends Screen {
     @FunctionalInterface
     private interface HlFn { int[] get(int sw, int sh); }
 
-    private enum BgType  { WORLD, MENU, CRAFTING, SHULKER }
+    private enum BgType  { WORLD, MENU, CRAFTING, TRADE, SHULKER }
     private enum CardPos { DEFAULT, CENTER }
 
     private record Step(String title, BgType bg, int menuTab, HlFn hl, CardPos pos, String[] lines) {}
@@ -100,6 +100,11 @@ public class GatherTutorialScreen extends Screen {
             "Open a §ecrafting table§r while goals are active.",
             "§a§lCrafting Goals§r panel lists items you can craft right now.",
             "§eClick§r a row to craft one  ·  §eRight-click§r to craft all possible."),
+        step("Trade Calculator", BgType.TRADE, -1,
+            (sw, sh) -> tradePanelRegion(sw, sh),
+            "Open a §emerchant screen§r to see the trade calculator button.",
+            "Pick a trade, enter how many results you want, then add the buy items as goals.",
+            "Great for villager books, tools, and bulk emerald trades."),
         step("Collector Shulker", BgType.SHULKER, -1,
             (sw, sh) -> shulkerButtonRegion(sw, sh),
             "§a§lCollector§r shulker auto-pulls needed items as you play.",
@@ -207,6 +212,14 @@ public class GatherTutorialScreen extends Screen {
         return new int[]{ panX, bgY + 18, panW, panH - 18 };
     }
 
+    private static int[] tradePanelRegion(int sw, int sh) {
+        int bgX  = sw / 2 - 88, bgY  = sh / 2 - 83;
+        int panW = 222, panH = 168;
+        int panX = bgX - panW - 8;
+        if (panX < 4) panX = bgX + 4;
+        return new int[]{ panX, bgY + 2, panW, panH };
+    }
+
     private static int[] shulkerButtonRegion(int sw, int sh) {
         int bgX = sw / 2 - 88, bgY = sh / 2 - 83;
         int BUTTON_W = 100, BUTTON_H = 14;
@@ -236,6 +249,11 @@ public class GatherTutorialScreen extends Screen {
     }
 
     private int targetCardX(int cw, Step s, int[] hl) {
+        if (s.bg() == BgType.TRADE) {
+            int merchantX = width / 2 - 88;
+            int x = Math.max(merchantX + 176 + 24, width - cw - 12);
+            return Math.max(8, Math.min(width - cw - 8, x));
+        }
         if (s.pos() == CardPos.CENTER) {
             int x = width / 2 - cw / 2;
             if (s.bg() == BgType.MENU) x = Math.min(x, menuRightColX() - 10 - cw);
@@ -248,6 +266,7 @@ public class GatherTutorialScreen extends Screen {
     }
 
     private int targetCardY(int ch, Step s, int[] hl) {
+        if (s.bg() == BgType.TRADE) return height / 2 - ch / 2;
         if (s.pos() == CardPos.CENTER) return height / 2 - ch / 2;
         if (s.bg() == BgType.MENU && s.menuTab() == 1 && rightColAvail() >= 120) {
             if (hl != null) {
@@ -334,6 +353,7 @@ public class GatherTutorialScreen extends Screen {
         switch (s.bg()) {
             case MENU     -> { if (embeddedMenu != null) embeddedMenu.render(ctx, -9999, -9999, delta); }
             case CRAFTING -> drawCraftingMockup(ctx);
+            case TRADE    -> drawTradeMockup(ctx);
             case SHULKER  -> drawShulkerMockup(ctx);
             default       -> {}
         }
@@ -494,6 +514,114 @@ public class GatherTutorialScreen extends Screen {
         ctx.fill(x, y, x + 1, y + 18, 0xFF07111F);
         ctx.fill(x + 17, y, x + 18, y + 18, 0xFF3A5570);
         ctx.fill(x, y + 17, x + 18, y + 18, 0xFF3A5570);
+    }
+
+    private void drawTradeMockup(DrawContext ctx) {
+        ctx.fill(0, 0, width, height, 0x80000000);
+
+        int bgW = 176, bgH = 166;
+        int bgX = width / 2 - bgW / 2;
+        int bgY = height / 2 - bgH / 2;
+
+        ctx.fill(bgX, bgY, bgX + bgW, bgY + bgH, 0xFF1A1620);
+        ctx.fill(bgX, bgY, bgX + bgW, bgY + 1, 0xFF5A4C63);
+        ctx.fill(bgX, bgY, bgX + 1, bgY + bgH, 0xFF5A4C63);
+        ctx.fill(bgX + bgW - 1, bgY, bgX + bgW, bgY + bgH, 0xFF0E0C12);
+        ctx.fill(bgX, bgY + bgH - 1, bgX + bgW, bgY + bgH, 0xFF0E0C12);
+        ctx.drawTextWithShadow(textRenderer, Text.literal("Merchant"), bgX + 6, bgY + 6, 0xFFCCDDFF);
+
+        int[] panel = tradePanelRegion(width, height);
+        int panelX = panel[0];
+        int panelY = panel[1];
+        int panelW = panel[2];
+        int panelH = panel[3];
+
+        drawTradePanel(ctx, panelX, panelY, panelW, panelH);
+        ctx.drawTextWithShadow(textRenderer, Text.literal("Trade Calculator"), panelX + 6, panelY + 6, 0xFFCCDDFF);
+        drawTradeCloseButton(ctx, panelX + panelW - 15, panelY + 5);
+
+        drawTradeRow(ctx, panelX + 5, panelY + 24, true,
+                Items.EMERALD.getDefaultStack(), Items.BOOK.getDefaultStack(), Items.ENCHANTED_BOOK.getDefaultStack(),
+                "Mending Book");
+        drawTradeRow(ctx, panelX + 5, panelY + 50, false,
+                Items.EMERALD.getDefaultStack(), Items.REDSTONE.getDefaultStack(), Items.COMPASS.getDefaultStack(),
+                "Compass");
+        drawTradeRow(ctx, panelX + 5, panelY + 76, false,
+                Items.EMERALD.getDefaultStack(), Items.ROTTEN_FLESH.getDefaultStack(), Items.GOLDEN_APPLE.getDefaultStack(),
+                "Golden Apple");
+        drawTradeRow(ctx, panelX + 5, panelY + 102, false,
+                Items.EMERALD.getDefaultStack(), Items.PAPER.getDefaultStack(), Items.BOOKSHELF.getDefaultStack(),
+                "Bookshelf");
+
+        int detailTop = panelY + 126;
+        ctx.drawTextWithShadow(textRenderer, Text.literal("Want"), panelX + 6, detailTop + 4, 0xFF8899AA);
+        drawTradeAmountField(ctx, panelX + 45, detailTop + 1);
+        ctx.drawTextWithShadow(textRenderer, Text.literal("64"), panelX + 104, detailTop + 4, 0xFFCCDDFF);
+        ctx.drawTextWithShadow(textRenderer, Text.literal("Trades 4  receive 64"), panelX + 6, detailTop + 19, 0xFF8899AA);
+        drawTradeCostSlot(ctx, panelX + 6, detailTop + 30, new net.minecraft.item.ItemStack(Items.EMERALD, 4));
+        drawTradeCostSlot(ctx, panelX + 42, detailTop + 30, new net.minecraft.item.ItemStack(Items.BOOK, 4));
+
+        int btnW = 76;
+        int btnH = 16;
+        int btnX = panelX + panelW - 6 - btnW;
+        int btnY = detailTop + 31;
+        ctx.fill(btnX, btnY, btnX + btnW, btnY + btnH, 0xFF223355);
+        ctx.fill(btnX, btnY, btnX + btnW, btnY + 1, 0xFF334466);
+        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("Add Goals"), btnX + btnW / 2, btnY + 4, 0xFFCCDDFF);
+    }
+
+    private void drawTradePanel(DrawContext ctx, int x, int y, int w, int h) {
+        ctx.fill(x + 3, y + 3, x + w + 3, y + h + 3, 0x66000000);
+        ctx.fill(x, y, x + w, y + h, 0xFF0E1826);
+        ctx.fill(x, y, x + w, y + 1, 0xFF334455);
+        ctx.fill(x, y, x + 1, y + h, 0xFF334455);
+        ctx.fill(x + w - 1, y, x + w, y + h, 0xFF07111F);
+        ctx.fill(x, y + h - 1, x + w, y + h, 0xFF07111F);
+        ctx.fill(x + 4, y + 20, x + w - 4, y + 21, 0xFF334455);
+    }
+
+    private void drawTradeRow(DrawContext ctx, int x, int y, boolean hovered,
+                              net.minecraft.item.ItemStack first, net.minecraft.item.ItemStack second,
+                              net.minecraft.item.ItemStack sell, String label) {
+        ctx.fill(x, y, x + 212, y + 22, hovered ? 0xFF243A57 : 0xFF152233);
+        ctx.fill(x, y, x + 212, y + 1, 0xFF334455);
+        ctx.fill(x + 2, y + 2, x + 208, y + 20, hovered ? 0x33336699 : 0x22112233);
+        drawTradeSlot(ctx, x + 5, y + 2, first);
+        int textX = x + 26;
+        if (!second.isEmpty()) {
+            ctx.drawTextWithShadow(textRenderer, Text.literal("+"), textX - 1, y + 7, 0xFF8899AA);
+            drawTradeSlot(ctx, textX + 8, y + 2, second);
+            textX += 34;
+        }
+        ctx.drawTextWithShadow(textRenderer, Text.literal("->"), textX - 2, y + 7, 0xFF8899AA);
+        drawTradeSlot(ctx, textX + 14, y + 2, sell);
+        ctx.drawTextWithShadow(textRenderer, Text.literal(label), textX + 42, y + 7, 0xFFCCDDFF);
+    }
+
+    private void drawTradeSlot(DrawContext ctx, int x, int y, net.minecraft.item.ItemStack stack) {
+        drawSlot(ctx, x, y, 18);
+        ctx.drawItem(stack, x + 1, y + 1);
+        if (stack.getCount() > 1) {
+            ctx.drawStackOverlay(textRenderer, stack, x + 1, y + 1);
+        }
+    }
+
+    private void drawTradeCostSlot(DrawContext ctx, int x, int y, net.minecraft.item.ItemStack stack) {
+        drawTradeSlot(ctx, x, y, stack);
+    }
+
+    private void drawTradeCloseButton(DrawContext ctx, int x, int y) {
+        ctx.fill(x, y, x + 9, y + 9, 0xFF17283B);
+        ctx.drawText(textRenderer, Text.literal("x"), x + 2, y, 0xFFCCDDFF, false);
+    }
+
+    private void drawTradeAmountField(DrawContext ctx, int x, int y) {
+        ctx.fill(x, y, x + 52, y + 14, 0xFF162335);
+        ctx.fill(x, y, x + 52, y + 1, 0xFF07111F);
+        ctx.fill(x, y, x + 1, y + 14, 0xFF07111F);
+        ctx.fill(x + 51, y, x + 52, y + 14, 0xFF3A5570);
+        ctx.fill(x, y + 13, x + 52, y + 14, 0xFF3A5570);
+        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("64"), x + 26, y + 3, 0xFFCCDDFF);
     }
 
     private static final Identifier SHULKER_TEX =

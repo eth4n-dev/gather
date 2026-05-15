@@ -55,6 +55,11 @@ public class GatherHelpScreen extends Screen {
             HelpEntry.tip("Quick craft", "Click a row to craft needed items. Right-click a row to craft as many as possible."),
             HelpEntry.tip("Shulkers count", "Items inside shulker boxes in your inventory count toward goals and craft-ready checks."),
 
+            HelpEntry.section("Trading"),
+            HelpEntry.tip("Trade calculator", "Open a merchant screen to see the trade calculator button. It shows the current offers and lets you add the buy costs as goals."),
+            HelpEntry.tip("Pick a trade", "Select an offer, enter how many results you want, then press Add Goals to track the required emeralds and inputs."),
+            HelpEntry.tip("Best use", "The trade calculator is useful for villager books, tools, and bulk emerald trades."),
+
             HelpEntry.section("Chests And Finder"),
             HelpEntry.tip("Scan All", "When Scan All is on, chests you open are remembered and counted even after you walk away."),
             HelpEntry.tip("Manual scan", "When Scan All is off, use the manual scan key or modifier combo to mark nearby chests intentionally."),
