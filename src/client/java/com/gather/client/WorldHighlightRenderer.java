@@ -966,7 +966,7 @@ public class WorldHighlightRenderer {
             lastScanTime = now;
             lastPlayerPos = playerPos;
             lastVerticalExpandChunk = chunk;
-            startScanJob(playerPos, cachedNeededBlocks, GatherSettings.get().highlightRadius, true);
+            startScanJob(playerPos, cachedNeededBlocks, expandedVerticalScanRadius(), true);
             return;
         }
 
@@ -976,26 +976,34 @@ public class WorldHighlightRenderer {
             lastScanTime = now;
             lastPlayerPos = playerPos;
             int verticalRadius = chunk.equals(lastVerticalExpandChunk)
-                    ? GatherSettings.get().highlightRadius
+                    ? expandedVerticalScanRadius()
                     : initialVerticalScanRadius();
             startScanJob(playerPos, cachedNeededBlocks, verticalRadius, cachedHighlights != null);
         }
     }
 
     private static int initialVerticalScanRadius() {
+        return verticalScanRadius(false);
+    }
+
+    private static int expandedVerticalScanRadius() {
+        return verticalScanRadius(true);
+    }
+
+    private static int verticalScanRadius(boolean expanded) {
         GatherSettings settings = GatherSettings.get();
         int radius = Math.max(0, settings.highlightRadius);
         if (radius <= MIN_INITIAL_VERTICAL_SCAN_RADIUS) return radius;
-        if (settings.highlightScanBudget >= 16 || radius >= 256) return radius;
-        if (settings.highlightScanBudget >= 10 || radius >= 128) return Math.min(radius, 96);
-        if (settings.highlightScanBudget >= 6 || radius >= 64) return Math.min(radius, 48);
-        if (settings.highlightScanBudget >= 4 || radius >= 32) return Math.min(radius, 24);
+        if (settings.highlightScanBudget >= 48 || radius >= 320) return Math.min(radius, expanded ? 192 : 128);
+        if (settings.highlightScanBudget >= 20 || radius >= 256) return Math.min(radius, expanded ? 160 : 112);
+        if (settings.highlightScanBudget >= 12 || radius >= 128) return Math.min(radius, expanded ? 112 : 80);
+        if (settings.highlightScanBudget >= 8 || radius >= 64) return Math.min(radius, expanded ? 64 : 40);
         return Math.min(radius, MIN_INITIAL_VERTICAL_SCAN_RADIUS);
     }
 
     private static int verticalPriorityWeight() {
         GatherSettings settings = GatherSettings.get();
-        return settings.highlightScanBudget >= 16 || settings.highlightRadius >= 256
+        return settings.highlightScanBudget >= 20 || settings.highlightRadius >= 256
                 ? 1
                 : VERTICAL_PRIORITY_WEIGHT;
     }

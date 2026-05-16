@@ -12,18 +12,21 @@ import net.minecraft.text.Text;
 import java.util.List;
 
 public class GatherOutlinesSettingsScreen extends Screen {
-    private static final int MIN_RADIUS = 8;
-    private static final int MAX_RADIUS = 256;
+    private static final int CHUNK_SIZE = 16;
+    private static final int MIN_RADIUS_CHUNKS = 1;
+    private static final int MAX_RADIUS_CHUNKS = 20;
+    private static final int MIN_RADIUS = MIN_RADIUS_CHUNKS * CHUNK_SIZE;
+    private static final int MAX_RADIUS = MAX_RADIUS_CHUNKS * CHUNK_SIZE;
     private static final int MIN_OUTLINES = 8;
-    private static final int MAX_OUTLINES = 1052;
+    private static final int MAX_OUTLINES = 4096;
     private static final String[] LOAD_LABELS = {
             "Slowest", "Slower", "Slow", "Normal", "Fast", "Ultra Fast", "Ultra Duper Fast"
     };
     private static final int[] LOAD_SECONDS = {12, 8, 6, 4, 3, 2, 1};
     private static final String[] PRESET_LABELS = {"Performance", "Balanced", "Quality", "Fancy", "Extreme"};
-    private static final int[] PRESET_BUDGETS = {2, 4, 6, 10, 16};
-    private static final int[] PRESET_RADII = {8, 32, 64, 128, 256};
-    private static final int[] PRESET_MAX_OUTLINES = {32, 100, 200, 512, 1052};
+    private static final int[] PRESET_BUDGETS = {3, 8, 12, 20, 48};
+    private static final int[] PRESET_RADII = {16, 64, 128, 256, 320};
+    private static final int[] PRESET_MAX_OUTLINES = {64, 200, 512, 1536, 4096};
     private static final int[] PRESET_RAMP_SECONDS = {12, 6, 3, 2, 1};
 
     private final Screen parent;
@@ -60,16 +63,19 @@ public class GatherOutlinesSettingsScreen extends Screen {
                 .build());
 
         addDrawableChild(new SliderWidget(cx - 100, cy - 30, 200, 20,
-                Text.literal("Outline Range: " + GatherSettings.get().highlightRadius),
-                (clamp(GatherSettings.get().highlightRadius, MIN_RADIUS, MAX_RADIUS) - MIN_RADIUS)
-                        / (double) (MAX_RADIUS - MIN_RADIUS)) {
-            @Override protected void updateMessage() { setMessage(Text.literal("Outline Range: " + toRadius())); }
+                Text.literal("Outline Range: " + radiusLabel(GatherSettings.get().highlightRadius)),
+                (clamp(blocksToChunks(GatherSettings.get().highlightRadius), MIN_RADIUS_CHUNKS, MAX_RADIUS_CHUNKS) - MIN_RADIUS_CHUNKS)
+                        / (double) (MAX_RADIUS_CHUNKS - MIN_RADIUS_CHUNKS)) {
+            @Override protected void updateMessage() { setMessage(Text.literal("Outline Range: " + radiusLabel(toRadius()))); }
             @Override protected void applyValue() {
                 GatherSettings.get().highlightRadius = toRadius();
                 GatherSettings.get().save();
                 WorldHighlightRenderer.invalidateCache();
             }
-            private int toRadius() { return MIN_RADIUS + (int) Math.round(value * (MAX_RADIUS - MIN_RADIUS)); }
+            private int toRadius() {
+                int chunks = MIN_RADIUS_CHUNKS + (int) Math.round(value * (MAX_RADIUS_CHUNKS - MIN_RADIUS_CHUNKS));
+                return chunks * CHUNK_SIZE;
+            }
         });
 
         addDrawableChild(new SliderWidget(cx - 100, cy - 5, 200, 20,
@@ -153,7 +159,8 @@ public class GatherOutlinesSettingsScreen extends Screen {
                     Text.literal("Applies to normal outlines and block xray outlines."));
         } else if (inside(mx, my, cx - 100, cy - 30, 200, 20)) {
             setTooltip(mx, my,
-                    Text.literal("How far Gather scans for matching placed blocks."),
+                    Text.literal("Horizontal scan distance in chunks."),
+                    Text.literal("Only loaded chunks can be scanned."),
                     Text.literal("Higher values cost more rendering and scanning work."));
         } else if (inside(mx, my, cx - 100, cy - 5, 200, 20)) {
             setTooltip(mx, my,
@@ -188,6 +195,15 @@ public class GatherOutlinesSettingsScreen extends Screen {
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static int blocksToChunks(int blocks) {
+        return Math.max(MIN_RADIUS_CHUNKS, (int) Math.ceil(blocks / (double) CHUNK_SIZE));
+    }
+
+    private static String radiusLabel(int blocks) {
+        int chunks = blocksToChunks(blocks);
+        return chunks + " chunk" + (chunks == 1 ? "" : "s") + " (" + (chunks * CHUNK_SIZE) + " blocks)";
     }
 
     private static int loadIndexForSeconds(int seconds) {
