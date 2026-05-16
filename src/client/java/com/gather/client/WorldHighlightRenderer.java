@@ -1061,7 +1061,7 @@ public class WorldHighlightRenderer {
                     scanJob.radius(), scanJob.verticalRadius(), scanJob.highlightSet());
         }
         pruneCachedHighlights(world, neededBlocks, exposedOnly);
-        applyHighlightLimit(scanJob.highlights(), scanJob.highlightSet(), scanJob.origin());
+        applyHighlightLimit(world, scanJob.highlights(), scanJob.highlightSet(), scanJob.origin());
         cachedHighlights = scanJob.highlights();
         if (scanJob.pending().isEmpty()) scanJob = null;
     }
@@ -1134,16 +1134,53 @@ public class WorldHighlightRenderer {
         }
     }
 
-    private static void applyHighlightLimit(List<BlockPos> result, Set<Long> existing, BlockPos origin) {
+    private static void applyHighlightLimit(ClientWorld world, List<BlockPos> result, Set<Long> existing, BlockPos origin) {
         int limit = GatherSettings.get().maxBlockHighlights;
         if (limit > 0 && result.size() > limit) {
             int ox = origin.getX(), oy = origin.getY(), oz = origin.getZ();
             result.sort((a, b) -> Integer.compare(
                     highlightDistanceScore(a, ox, oy, oz),
                     highlightDistanceScore(b, ox, oy, oz)));
-            for (int i = limit; i < result.size(); i++) existing.remove(result.get(i).asLong());
-            result.subList(limit, result.size()).clear();
+            List<BlockPos> limited = balancedHighlightLimit(world, result, limit);
+            existing.clear();
+            for (BlockPos pos : limited) existing.add(pos.asLong());
+            result.clear();
+            result.addAll(limited);
         }
+    }
+
+    private static List<BlockPos> balancedHighlightLimit(ClientWorld world, List<BlockPos> sorted, int limit) {
+        if (sorted.size() <= limit) return sorted;
+        Map<Block, Integer> totalsByBlock = new HashMap<>();
+        for (BlockPos pos : sorted) {
+            Block block = world.getBlockState(pos).getBlock();
+            totalsByBlock.put(block, totalsByBlock.getOrDefault(block, 0) + 1);
+        }
+        if (totalsByBlock.size() <= 1) return new ArrayList<>(sorted.subList(0, limit));
+
+        int blockTypes = totalsByBlock.size();
+        int softCapPerBlock = Math.max(1, (int) Math.ceil(limit / (double) blockTypes));
+        Map<Block, Integer> usedByBlock = new HashMap<>();
+        List<BlockPos> firstPass = new ArrayList<>(limit);
+        List<BlockPos> overflow = new ArrayList<>();
+
+        for (BlockPos pos : sorted) {
+            Block block = world.getBlockState(pos).getBlock();
+            int used = usedByBlock.getOrDefault(block, 0);
+            if (used < softCapPerBlock || totalsByBlock.getOrDefault(block, 0) <= softCapPerBlock) {
+                firstPass.add(pos);
+                usedByBlock.put(block, used + 1);
+                if (firstPass.size() >= limit) return firstPass;
+            } else {
+                overflow.add(pos);
+            }
+        }
+
+        for (BlockPos pos : overflow) {
+            if (firstPass.size() >= limit) break;
+            firstPass.add(pos);
+        }
+        return firstPass;
     }
 
     private static List<BlockPos> visibleHighlights() {
