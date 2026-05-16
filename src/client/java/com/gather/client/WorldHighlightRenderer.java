@@ -1207,13 +1207,43 @@ public class WorldHighlightRenderer {
     }
 
     private static boolean isHiddenUnderground(ClientLevel world, BlockPos pos) {
+        Block block = world.getBlockState(pos).getBlock();
+        boolean terrainBlock = isTerrainBlock(block);
         for (Direction dir : Direction.values()) {
-            BlockState neighbor = world.getBlockState(pos.relative(dir));
-            if (neighbor.isAir() || !neighbor.getFluidState().isEmpty()) return false;
+            BlockPos neighborPos = pos.relative(dir);
+            BlockState neighbor = world.getBlockState(neighborPos);
             if (isSnowExposureBlock(neighbor)) continue;
-            if (!neighbor.canOcclude()) return false;
+            if (neighbor.canOcclude()) continue;
+            if (!terrainBlock || isSurfaceVisibleNeighbor(world, neighborPos)) return false;
         }
         return true;
+    }
+
+    private static boolean isSurfaceVisibleNeighbor(ClientLevel world, BlockPos pos) {
+        return world.canSeeSky(pos) || world.canSeeSky(pos.above());
+    }
+
+    private static boolean isTerrainBlock(Block block) {
+        String id = BuiltInRegistries.BLOCK.getKey(block).toString();
+        return id.equals("minecraft:stone")
+                || id.equals("minecraft:cobblestone")
+                || id.equals("minecraft:deepslate")
+                || id.equals("minecraft:cobbled_deepslate")
+                || id.equals("minecraft:tuff")
+                || id.equals("minecraft:calcite")
+                || id.equals("minecraft:granite")
+                || id.equals("minecraft:diorite")
+                || id.equals("minecraft:andesite")
+                || id.equals("minecraft:dirt")
+                || id.equals("minecraft:coarse_dirt")
+                || id.equals("minecraft:grass_block")
+                || id.equals("minecraft:podzol")
+                || id.equals("minecraft:mycelium")
+                || id.equals("minecraft:netherrack")
+                || id.equals("minecraft:basalt")
+                || id.equals("minecraft:blackstone")
+                || id.equals("minecraft:end_stone")
+                || id.contains("_ore");
     }
 
     private static boolean isSnowExposureBlock(BlockState state) {
