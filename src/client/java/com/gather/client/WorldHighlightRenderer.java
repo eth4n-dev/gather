@@ -1205,14 +1205,43 @@ public class WorldHighlightRenderer {
     }
 
     private static boolean isHiddenUnderground(ClientWorld world, BlockPos pos) {
+        Block block = world.getBlockState(pos).getBlock();
+        boolean terrainBlock = isTerrainBlock(block);
         for (Direction dir : Direction.values()) {
             BlockPos neighbor = pos.offset(dir);
             BlockState state = world.getBlockState(neighbor);
-            if (state.isAir() || !state.getFluidState().isEmpty()) return false;
             if (isSnowExposureBlock(state)) continue;
-            if (!state.isOpaqueFullCube()) return false;
+            if (state.isOpaqueFullCube()) continue;
+            if (!terrainBlock || isSurfaceVisibleNeighbor(world, neighbor)) return false;
         }
         return true;
+    }
+
+    private static boolean isSurfaceVisibleNeighbor(ClientWorld world, BlockPos pos) {
+        return world.isSkyVisible(pos) || world.isSkyVisible(pos.up());
+    }
+
+    private static boolean isTerrainBlock(Block block) {
+        String id = Registries.BLOCK.getId(block).toString();
+        return id.equals("minecraft:stone")
+                || id.equals("minecraft:cobblestone")
+                || id.equals("minecraft:deepslate")
+                || id.equals("minecraft:cobbled_deepslate")
+                || id.equals("minecraft:tuff")
+                || id.equals("minecraft:calcite")
+                || id.equals("minecraft:granite")
+                || id.equals("minecraft:diorite")
+                || id.equals("minecraft:andesite")
+                || id.equals("minecraft:dirt")
+                || id.equals("minecraft:coarse_dirt")
+                || id.equals("minecraft:grass_block")
+                || id.equals("minecraft:podzol")
+                || id.equals("minecraft:mycelium")
+                || id.equals("minecraft:netherrack")
+                || id.equals("minecraft:basalt")
+                || id.equals("minecraft:blackstone")
+                || id.equals("minecraft:end_stone")
+                || id.contains("_ore");
     }
 
     private static boolean isSnowExposureBlock(BlockState state) {
