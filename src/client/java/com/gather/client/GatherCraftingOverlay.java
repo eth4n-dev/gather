@@ -406,9 +406,17 @@ public class GatherCraftingOverlay {
             if (!n.broken || effNeeded[j] == 0) continue;
             if (computeMaxCraftableChained(j, n, nodes) >= 1) ordered.add(j);
         }
-        ordered.sort((a, b) -> Integer.compare(nodes.get(a).depth, nodes.get(b).depth));
+        ordered.sort((a, b) -> {
+            boolean aGoal = nodes.get(a).depth == 0;
+            boolean bGoal = nodes.get(b).depth == 0;
+            if (aGoal != bGoal) return aGoal ? -1 : 1;
+            int cA = countDirectChildren(a, nodes);
+            int cB = countDirectChildren(b, nodes);
+            if (cB != cA) return Integer.compare(cB, cA);
+            return Integer.compare(nodes.get(a).depth, nodes.get(b).depth);
+        });
 
-        // Merge duplicate itemIds into one CraftEntry (preserves shallowest-first order).
+        // Merge duplicate itemIds into one CraftEntry (more children = higher priority).
         Map<String, CraftEntry> byItem = new LinkedHashMap<>();
         for (int j : ordered) {
             String id = nodes.get(j).itemId;
@@ -419,6 +427,17 @@ public class GatherCraftingOverlay {
             }).indices().add(j);
         }
         return new ArrayList<>(byItem.values());
+    }
+
+    private static int countDirectChildren(int ni, List<ListNode> nodes) {
+        ListNode parent = nodes.get(ni);
+        int count = 0;
+        for (int j = ni + 1; j < nodes.size(); j++) {
+            ListNode child = nodes.get(j);
+            if (child.depth <= parent.depth) break;
+            if (child.depth == parent.depth + 1) count++;
+        }
+        return count;
     }
 
     private static int computeMaxCraftable(int ni, ListNode node) {

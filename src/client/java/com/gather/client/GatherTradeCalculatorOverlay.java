@@ -9,7 +9,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import net.minecraft.client.gui.screens.inventory.MerchantScreen;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.world.item.Item;
@@ -34,6 +36,7 @@ public final class GatherTradeCalculatorOverlay {
     private static final int CLOSE_SIZE = 9;
     private static final int PAD = 6;
     private static final int MAX_WANTED_AMOUNT = 99999;
+    private static final int MERCHANT_BG_H = 166;
 
     private static boolean panelOpen = false;
     private static float panelAnim = 0.0F;
@@ -45,6 +48,7 @@ public final class GatherTradeCalculatorOverlay {
     private static int tooltipY;
     private static int statusTicks = 0;
     private static String statusText = "";
+    private static boolean clearOnNextClick = false;
 
     private GatherTradeCalculatorOverlay() {
     }
@@ -60,18 +64,38 @@ public final class GatherTradeCalculatorOverlay {
             scroll = 0;
             statusTicks = 0;
             statusText = "";
+            clearOnNextClick = false;
 
             amountField = new EditBox(client.font, 0, 0, 52, 14, Component.literal("Amount"));
             amountField.setMaxLength(String.valueOf(MAX_WANTED_AMOUNT).length());
+            final boolean[] sanitizing = {false};
+            amountField.setResponder(val -> {
+                if (sanitizing[0]) return;
+                String clean = val.replaceAll("[^0-9]", "");
+                if (!clean.equals(val)) {
+                    sanitizing[0] = true;
+                    amountField.setValue(clean);
+                    sanitizing[0] = false;
+                }
+            });
             amountField.setVisible(false);
+            MerchantScreen merchantRef = (MerchantScreen) screen;
             Screens.getWidgets(screen).add(amountField);
-
-            ScreenEvents.afterBackground(screen).register((s, ctx, mx, my, delta) -> {
-                hoveredLines = null;
-                renderOverlay((MerchantScreen) s, ctx, mx, my, delta);
+            Screens.getWidgets(screen).add(new AbstractWidget(0, 0, BUTTON_SIZE, BUTTON_SIZE, Component.empty()) {
+                @Override
+                protected void extractWidgetRenderState(GuiGraphicsExtractor ctx, int mx, int my, float delta) {
+                    if (GatherSettings.get().enabled) {
+                        int[] b = buttonBounds(merchantRef);
+                        renderToggleButton(ctx, mx, my, b[0], b[1]);
+                    }
+                }
+                @Override
+                protected void updateWidgetNarration(NarrationElementOutput output) {}
             });
 
             ScreenEvents.afterExtract(screen).register((s, ctx, mx, my, delta) -> {
+                hoveredLines = null;
+                renderOverlay((MerchantScreen) s, ctx, mx, my, delta);
                 if (hoveredLines != null) {
                     ctx.setComponentTooltipForNextFrame(client.font, hoveredLines, tooltipX, tooltipY);
                 }
@@ -82,13 +106,30 @@ public final class GatherTradeCalculatorOverlay {
                 int my = (int) click.y();
                 if (amountField != null && amountField.isVisible() && inside(mx, my,
                         amountField.getX(), amountField.getY(), amountField.getWidth(), amountField.getHeight())) {
-                    amountField.setFocused(true);
+                    if (clearOnNextClick) {
+                        amountField.setValue("");
+                        clearOnNextClick = false;
+                    }
+                    amountField.mouseClicked(click, false);
+                    ((MerchantScreen) s).setFocused(amountField);
+                    ((MerchantScreen) s).setDragging(true);
                     return false;
                 }
-                if (amountField != null) amountField.setFocused(false);
+                if (amountField != null) {
+                    amountField.setFocused(false);
+                    ((MerchantScreen) s).setFocused(null);
+                }
                 if (!isOverlayClickTarget((MerchantScreen) s, mx, my)) return true;
                 handleClick((MerchantScreen) s, mx, my, click.button());
                 return false;
+            });
+
+            ScreenMouseEvents.allowMouseDrag(screen).register((s, click, deltaX, deltaY) -> {
+                if (amountField != null && amountField.isVisible() && ((MerchantScreen) s).getFocused() == amountField) {
+                    amountField.mouseDragged(click, deltaX, deltaY);
+                    return false;
+                }
+                return true;
             });
 
             ScreenMouseEvents.allowMouseScroll(screen).register((s, mouseX, mouseY, horizontalAmount, verticalAmount) -> {
@@ -99,19 +140,28 @@ public final class GatherTradeCalculatorOverlay {
 
             ScreenKeyboardEvents.allowKeyPress(screen).register((s, input) -> {
                 if (!panelOpen) return true;
-                if (amountField != null && amountField.isFocused()) return handleAmountFieldKey(input);
+                if (amountField != null && ((MerchantScreen) s).getFocused() == amountField) {
+                    int key = input.key();
+                    if (key == GLFW.GLFW_KEY_ESCAPE || key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
+                        ((MerchantScreen) s).setFocused(null);
+                        amountField.setFocused(false);
+                        return false;
+                    }
+                    amountField.keyPressed(input);
+                    return false;
+                }
                 return handleKeyPress(input);
             });
+
         });
     }
 
     private static void renderOverlay(MerchantScreen screen, GuiGraphicsExtractor ctx, int mx, int my, float delta) {
         if (!GatherSettings.get().enabled) return;
         updateAnimation();
-        int[] button = buttonBounds(screen);
-        renderToggleButton(ctx, mx, my, button[0], button[1]);
 
         if (panelAnim <= 0.01F) {
+            if (amountField != null && screen.getFocused() == amountField) screen.setFocused(null);
             syncAmountField(false, 0, 0);
             return;
         }
@@ -119,6 +169,7 @@ public final class GatherTradeCalculatorOverlay {
         int[] bounds = panelBounds(screen);
         int panelX = bounds[0];
         int panelY = bounds[1] + Math.round((1.0F - easedPanelAnim()) * 18.0F);
+        GatherTheme.fill(ctx, panelX, panelY, panelX + PANEL_W, panelY + PANEL_H, 0xF20A1320);
         GatherTheme.drawNineSlice(ctx, GatherTheme.CRAFT_PANEL, panelX, panelY, PANEL_W, PANEL_H);
         Minecraft client = Minecraft.getInstance();
         ctx.text(client.font, Component.literal("Trade Calculator"),
@@ -186,6 +237,8 @@ public final class GatherTradeCalculatorOverlay {
             cx += 10;
             renderStack(ctx, second, cx, y, true);
             cx += 24;
+        } else {
+            cx += 34;
         }
         ctx.text(client.font, Component.literal("→"), cx, y + 5, muted, false);
         cx += 14;
@@ -230,10 +283,8 @@ public final class GatherTradeCalculatorOverlay {
         int costY = lineY + 13;
         int costX = panelX + PAD;
         for (Cost cost : calc.costs()) {
-            renderStack(ctx, cost.stack(), costX, costY - 2, false);
-            ctx.text(client.font, Component.literal("x" + cost.count()),
-                    costX + 20, costY + 2, GatherTheme.textPrimary(), false);
-            costX += 66;
+            renderCostStack(ctx, cost.stack(), cost.count(), costX, costY - 2);
+            costX += 22;
         }
 
         int btnW = 76;
@@ -281,6 +332,7 @@ public final class GatherTradeCalculatorOverlay {
         int panelY = bounds[1] + Math.round((1.0F - easedPanelAnim()) * 18.0F);
         if (inside(mx, my, panelX + PANEL_W - PAD - CLOSE_SIZE, panelY + 5, CLOSE_SIZE, CLOSE_SIZE)) {
             panelOpen = false;
+            if (amountField != null && screen.getFocused() == amountField) screen.setFocused(null);
             syncAmountField(false, 0, 0);
             playClick();
             return;
@@ -296,6 +348,7 @@ public final class GatherTradeCalculatorOverlay {
             if (offerIndex >= 0 && offerIndex < offers.size()) {
                 selectedTrade = offerIndex;
                 amountField.setValue(String.valueOf(Math.max(1, offers.get(offerIndex).getResult().getCount())));
+                clearOnNextClick = true;
                 statusTicks = 0;
                 playClick();
             }
@@ -331,34 +384,6 @@ public final class GatherTradeCalculatorOverlay {
         return true;
     }
 
-    private static boolean handleAmountFieldKey(KeyEvent input) {
-        int key = input.key();
-        if (key == GLFW.GLFW_KEY_ESCAPE) {
-            amountField.setFocused(false);
-            return false;
-        }
-        if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
-            amountField.setFocused(false);
-            return false;
-        }
-        if (key == GLFW.GLFW_KEY_BACKSPACE) {
-            String text = amountField.getValue();
-            if (!text.isEmpty()) amountField.setValue(text.substring(0, text.length() - 1));
-            return false;
-        }
-        if (key == GLFW.GLFW_KEY_DELETE) {
-            amountField.setValue("");
-            return false;
-        }
-        int digit = digitForKey(key);
-        if (digit >= 0 && amountField.getValue().length() < String.valueOf(MAX_WANTED_AMOUNT).length()) {
-            String next = amountField.getValue() + digit;
-            if (next.length() > 1 && next.startsWith("0")) next = next.substring(1);
-            amountField.setValue(String.valueOf(Math.min(MAX_WANTED_AMOUNT, Integer.parseInt(next))));
-            return false;
-        }
-        return false;
-    }
 
     private static void addGoals(MerchantOffer offer) {
         int wanted = wantedAmount();
@@ -454,6 +479,23 @@ public final class GatherTradeCalculatorOverlay {
         }
     }
 
+    private static void renderCostStack(GuiGraphicsExtractor ctx, ItemStack stack, int count, int x, int y) {
+        if (stack.isEmpty()) return;
+        ItemStack iconStack = stack.copy();
+        iconStack.setCount(1);
+        renderStack(ctx, iconStack, x, y, false);
+        Minecraft client = Minecraft.getInstance();
+        String label = compactCount(count);
+        int tw = client.font.width(label);
+        ctx.text(client.font, Component.literal(label), x + 18 - tw, y + 10, 0xFFFFFFFF);
+    }
+
+    private static String compactCount(int count) {
+        if (count < 1000) return Integer.toString(count);
+        if (count < 10000) return (count / 1000) + "k";
+        return "9k+";
+    }
+
     private static void syncAmountField(boolean visible, int x, int y) {
         if (amountField == null) return;
         amountField.setVisible(visible);
@@ -489,7 +531,7 @@ public final class GatherTradeCalculatorOverlay {
         int panelX = bgX - PANEL_W - 8;
         if (panelX < 4) panelX = bgX + 176 + 8;
         if (panelX + PANEL_W > screen.width - 4) panelX = screen.width - PANEL_W - 4;
-        int panelY = bgY + 2;
+        int panelY = bgY + (MERCHANT_BG_H - PANEL_H) / 2;
         if (panelY + PANEL_H > screen.height - 4) panelY = screen.height - PANEL_H - 4;
         if (panelY < 4) panelY = 4;
         return new int[]{panelX, panelY};

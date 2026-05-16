@@ -2,6 +2,7 @@ package com.gather.client.screen;
 
 import com.gather.client.GatherTheme;
 import com.gather.client.GatherSettings;
+import com.gather.client.GatherState;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -18,7 +19,7 @@ import java.util.List;
 public class GatherTutorialScreen extends Screen {
 
     // Mirrored from GatherMenuScreen
-    private static final int MENU_LIST_W  = 340;
+    private static final int MENU_LIST_W  = 300;
     private static final int MENU_PAD     = 6;
     private static final int MENU_BOT_H   = 28;
     private static final int MENU_TOGGLE_W = 84;
@@ -28,18 +29,25 @@ public class GatherTutorialScreen extends Screen {
     private static final int CARD_W_CTR   = 420;   // centered overlay steps
     private static final int NAV_BTN_W    = 66;
     private static final int NAV_BTN_H    = 16;
+    private static final int NAV_SCREEN_X = 10;
+    private static final int NAV_SCREEN_Y_PAD = 10;
     private static final int CARD_ANIM_MS = 350;
 
     // Absolute Y positions traced from renderListTab with Scan All OFF
     private static final int Y_SCAN_LABEL  = 40;
-    private static final int Y_OUTLINES    = 114;
-    private static final int Y_FINDER      = 132;
+    private static final int Y_OUTLINES    = 148;
+    private static final int Y_FINDER      = 166;
 
     @FunctionalInterface
     private interface HlFn { int[] get(int sw, int sh); }
 
-    private enum BgType  { WORLD, MENU, CRAFTING, TRADE, SHULKER }
-    private enum CardPos { DEFAULT, CENTER }
+    private enum BgType  { WORLD, MENU, CHEST_TOOLS, CRAFTING, TRADE, SHULKER }
+    private enum CardPos {
+        DEFAULT,
+        CENTER,        // card middle at screen center
+        CENTER_TOP,    // card top edge at screen center line
+        CENTER_BOTTOM  // card bottom edge at screen center line
+    }
 
     private record Step(String title, BgType bg, int menuTab, HlFn hl, CardPos pos, String[] lines) {}
 
@@ -48,6 +56,12 @@ public class GatherTutorialScreen extends Screen {
     }
     private static Step stepC(String title, BgType bg, int tab, HlFn hl, String... lines) {
         return new Step(title, bg, tab, hl, CardPos.CENTER, lines);
+    }
+    private static Step stepCT(String title, BgType bg, int tab, HlFn hl, String... lines) {
+        return new Step(title, bg, tab, hl, CardPos.CENTER_TOP, lines);
+    }
+    private static Step stepCB(String title, BgType bg, int tab, HlFn hl, String... lines) {
+        return new Step(title, bg, tab, hl, CardPos.CENTER_BOTTOM, lines);
     }
 
     // §e = yellow  §a = green  §6 = gold  §b = aqua  §7 = gray  §l = bold  §o = italic  §r = reset
@@ -67,11 +81,11 @@ public class GatherTutorialScreen extends Screen {
             (sw, sh) -> hudMod(sw, 2),
             "Items you can §a§lcraft right now§r appear in this column.",
             "Shulker contents in your inventory count toward crafting."),
-        stepC("The Gather Menu  [G]", BgType.MENU, 0,
+        stepCT("The Gather Menu  [G]", BgType.MENU, 0,
             (sw, sh) -> new int[]{ 0, 0, sw, sh },
             "Press §e§l[G]§r to open the Gather menu at any time.",
             "Manage goals, lists, chest scanning, and settings."),
-        stepC("Three Tabs", BgType.MENU, 0,
+        stepCB("Three Tabs", BgType.MENU, 0,
             (sw, sh) -> tabsOnly(sw),
             "§eMy Lists§r: active goals.   §eAdd Items§r: search & add goals.",
             "§eRecent§r: quickly re-add past goals for this world."),
@@ -88,25 +102,27 @@ public class GatherTutorialScreen extends Screen {
             (sw, sh) -> newListRegion(sw, sh),
             "Press §e+ New List§r to create a named list for any project.",
             "§7Right-click§r a header to hide/show in HUD.  §7Drag§r items to reorder."),
-        stepC("Chest Scanning", BgType.MENU, 0,
-            (sw, sh) -> leftAbsolute(sw, Y_SCAN_LABEL, (Y_OUTLINES + 14) - Y_SCAN_LABEL),
+        stepC("Chest Scanning", BgType.CHEST_TOOLS, 0,
+            (sw, sh) -> GatherMenuScreen.isCompactChestTools(sw, sh)
+                    ? chestScanningRegion(sw, sh) : leftAbsolute(sw, Y_SCAN_LABEL, (GatherMenuScreen.renderedOutlinesBtnY + 14) - Y_SCAN_LABEL),
             "§a§lScan All§r auto-tracks every chest you open.",
             "§aChest Outlines§r highlights known chests. Set range in its settings."),
-        stepC("Item Finder", BgType.MENU, 0,
-            (sw, sh) -> leftAbsolute(sw, Y_FINDER, 14),
+        stepC("Item Finder", BgType.CHEST_TOOLS, 0,
+            (sw, sh) -> GatherMenuScreen.isCompactChestTools(sw, sh)
+                    ? itemFinderRegion(sw, sh) : leftAbsolute(sw, GatherMenuScreen.renderedFinderBtnY, 15, 150),
             "Select a needed item; a §acompass arrow§r appears near your crosshair.",
             "Points to the nearest tracked chest containing that item."),
         step("Crafting Overlay", BgType.CRAFTING, -1,
             (sw, sh) -> craftingPanelRegion(sw, sh),
             "Open a §ecrafting table§r while goals are active.",
             "§a§lCrafting Goals§r panel lists items you can craft right now.",
-            "§eClick§r a row to craft one  ·  §eRight-click§r to craft all possible."),
+            "§eLeft-click§r a row to craft needed  ·  §eRight-click§r to craft all possible."),
         step("Trade Calculator", BgType.TRADE, -1,
             (sw, sh) -> tradePanelRegion(sw, sh),
             "Open a §emerchant screen§r to see the trade calculator button.",
             "Pick a trade, enter how many results you want, then add the buy items as goals.",
             "Great for villager books, tools, and bulk emerald trades."),
-        step("Collector Shulker", BgType.SHULKER, -1,
+        stepCT("Collector Shulker", BgType.SHULKER, -1,
             (sw, sh) -> shulkerButtonRegion(sw, sh),
             "§a§lCollector§r shulker auto-pulls needed items as you play.",
             "§bAll Goals§r: pulls everything needed.  §bCertain§r: pick specific items.",
@@ -129,8 +145,8 @@ public class GatherTutorialScreen extends Screen {
         { Items.RAW_IRON,   "Raw Iron",    "0/16"  },
     };
     private static final Object[][] FAKE_CRAFT = {
-        { Items.STICK,      "Stick",      "ready" },
-        { Items.OAK_PLANKS, "Oak Planks", "ready" },
+        { Items.IRON_SWORD,  "Iron Sword",  "ready" },
+        { Items.IRON_PICKAXE,"Iron Pickaxe","need 3" },
     };
 
     // ── State ────────────────────────────────────────────────────────────────
@@ -138,6 +154,7 @@ public class GatherTutorialScreen extends Screen {
     private int  step        = 0;
     private long stepStartMs = 0;
     private GatherMenuScreen embeddedMenu = null;
+    private GatherChestToolsScreen embeddedChestTools = null;
 
     private float cardFromY, cardToY, cardFromX, cardToX;
     private long  cardAnimStart;
@@ -180,8 +197,40 @@ public class GatherTutorialScreen extends Screen {
     }
 
     private static int[] leftAbsolute(int sw, int y, int h) {
-        int cx = (sw / 2 - MENU_LIST_W / 2) / 2;
-        return new int[]{ cx - 75, y, 150, h };
+        int lx = sw / 2 - MENU_LIST_W / 2;
+        int cx = lx / 2;
+        int w = Math.max(100, lx - 8);
+        return new int[]{ Math.max(0, cx - w / 2), y, w, h };
+    }
+
+    private static int[] leftAbsolute(int sw, int y, int h, int maxW) {
+        int lx = sw / 2 - MENU_LIST_W / 2;
+        int cx = lx / 2;
+        int w = Math.min(maxW, Math.max(80, lx - 8));
+        return new int[]{ Math.max(0, cx - w / 2), y, w, h };
+    }
+
+    private static int[] chestToolsPanel(int sw, int sh) {
+        int panelW = Math.min(220, sw - 16);
+        int panelX = sw / 2 - panelW / 2;
+        int panelY = sh < 240 ? 6 : Math.max(28, sh / 2 - 124);
+        int buttonH = sh < 240 ? 16 : 20;
+        return new int[]{ panelX, panelY, panelW, buttonH };
+    }
+
+    private static int[] chestScanningRegion(int sw, int sh) {
+        int[] panel = chestToolsPanel(sw, sh);
+        boolean compact = sh < 240;
+        int rowStep = compact ? 18 : 24;
+        int rowStart = panel[1] + (compact ? 16 : 28);
+        int h = 3 * rowStep;  // Scan All + Manual Scan + Chest Outlines
+        return new int[]{ panel[0] + 10, rowStart, panel[2] - 20, h };
+    }
+
+    private static int[] itemFinderRegion(int sw, int sh) {
+        int[] panel = chestToolsPanel(sw, sh);
+        int rowY = panel[1] + (sh < 240 ? 16 : 28) + 4 * (sh < 240 ? 18 : 24);
+        return new int[]{ panel[0] + 10, rowY, panel[2] - 20, panel[3] };
     }
 
     // Right-panel mode toggle: wide enough to cover the label + button + description text
@@ -189,13 +238,24 @@ public class GatherTutorialScreen extends Screen {
         int lx   = sw / 2 - MENU_LIST_W / 2;
         int rpCx = (lx + MENU_LIST_W + sw) / 2;
         int ty   = sh / 2 - MENU_TOGGLE_H / 2;
-        int hlW  = 210;  // wide enough for the longest desc line
+        int hlW  = Math.min(210, Math.max(100, sw - (lx + MENU_LIST_W) - 8));
         return new int[]{ rpCx - hlW / 2, ty - 18, hlW, MENU_TOGGLE_H + 18 + 36 };
     }
 
     // + New List button in lower-left panel
     private static int[] newListRegion(int sw, int sh) {
-        int lx     = sw / 2 - MENU_LIST_W / 2;
+        int lx = sw / 2 - MENU_LIST_W / 2;
+        if (GatherMenuScreen.isCompactChestTools(sw, sh)) {
+            // Compact: LISTS label + + New List button in compact left panel
+            int leftW = Math.max(0, lx - 6);
+            int btnW = Math.min(96, Math.max(72, leftW - 8));
+            int leftCx = Math.max(4, lx / 2);
+            int btnX = Math.max(4, leftCx - btnW / 2);
+            int ly = MENU_PAD + 22 + 4;
+            int listLabelY = ly + 24 + MENU_TOGGLE_H + 14;  // below chest button
+            int btnY = listLabelY + 12;
+            return new int[]{ btnX - 4, listLabelY - 2, btnW + 8, MENU_TOGGLE_H + 16 };
+        }
         int leftCx = lx / 2;
         int panelBot = sh - MENU_BOT_H;
         int panelMid = (MENU_PAD + 22 + 4 + panelBot) / 2;
@@ -209,7 +269,8 @@ public class GatherTutorialScreen extends Screen {
         int bgX  = sw / 2 - 88, bgY  = sh / 2 - 83;
         int panW = 186, panH = 132;
         int panX = bgX - panW - 8;
-        if (panX < 4) panX = bgX + 4;
+        if (panX < 4) panX = bgX + 176 + 8;
+        if (panX + panW > sw - 4) panX = sw - panW - 4;
         return new int[]{ panX, bgY + 18, panW, panH - 18 };
     }
 
@@ -217,8 +278,9 @@ public class GatherTutorialScreen extends Screen {
         int bgX  = sw / 2 - 88, bgY  = sh / 2 - 83;
         int panW = 222, panH = 168;
         int panX = bgX - panW - 8;
-        if (panX < 4) panX = bgX + 4;
-        return new int[]{ panX, bgY + 2, panW, panH };
+        if (panX < 4) panX = bgX + 176 + 8;
+        if (panX + panW > sw - 4) panX = sw - panW - 4;
+        return new int[]{ panX, bgY + (166 - panH) / 2, panW, panH };
     }
 
     private static int[] shulkerButtonRegion(int sw, int sh) {
@@ -234,7 +296,17 @@ public class GatherTutorialScreen extends Screen {
     private int menuRightColX() { return width / 2 + MENU_LIST_W / 2 + 10; }
     private int rightColAvail() { return width - menuRightColX() - 4; }
 
+    private boolean compactTutorial() {
+        return width < 400 || height < 220;
+    }
+
     private int cardWidth(Step s) {
+        if (compactTutorial()) {
+            if (s.bg() == BgType.CHEST_TOOLS && menuIsCompact())
+                return Math.max(80, Math.min(width - (NAV_SCREEN_X + NAV_BTN_W * 3 + 12) - 16, 160));
+            return Math.max(180, Math.min(300, width - 16));
+        }
+        if (width < 720) return Math.max(220, Math.min(280, width - 16));
         if (s.pos() == CardPos.CENTER)                          return Math.min(CARD_W_CTR, width - 16);
         if (s.bg() == BgType.MENU && s.menuTab() == 1 && rightColAvail() >= 120) return rightColAvail();
         return Math.min(CARD_W, width - 16);
@@ -246,17 +318,44 @@ public class GatherTutorialScreen extends Screen {
             List<FormattedCharSequence> wrapped = font.split(Component.literal(line), innerW);
             lineCount += Math.max(1, wrapped.size());
         }
-        return 24 + lineCount * 11 + 26;
+        return 24 + lineCount * 11 + 26 + (compactTutorial() ? 12 : 0);
     }
 
     private int targetCardX(int cw, Step s, int[] hl) {
-        if (s.bg() == BgType.TRADE) {
-            int x = hl != null ? hl[0] + hl[2] + 8 : width / 2 + 88;
+        if (compactTutorial()) {
+            if (s.bg() == BgType.CHEST_TOOLS && menuIsCompact())
+                return Math.max(NAV_SCREEN_X + NAV_BTN_W * 3 + 12 + 8, width - cw - 8);
+            return Math.max(8, width / 2 - cw / 2);
+        }
+        if (s.bg() == BgType.CHEST_TOOLS) {
+            if (!menuIsCompact()) {
+                // Left panel in menu: card goes to the right of the highlighted region
+                if (hl != null) {
+                    int hlCenter = hl[0] + hl[2] / 2;
+                    if (hlCenter < width / 2) return Math.max(8, Math.min(width - cw - 8, hl[0] + hl[2] + 10));
+                    return Math.max(8, Math.min(width - cw - 8, hl[0] - cw - 10));
+                }
+                return Math.max(8, width / 2 - cw / 2);
+            }
+            int panelW = Math.min(220, width - 16);
+            int panelX = width / 2 - panelW / 2;
+            int leftX = panelX - cw - 8;
+            if (leftX >= 8) return leftX;
+            return Math.max(8, Math.min(width - cw - 8, width / 2 - cw / 2));
+        }
+        if (s.pos() == CardPos.CENTER || s.pos() == CardPos.CENTER_TOP || s.pos() == CardPos.CENTER_BOTTOM) {
+            int x = width / 2 - cw / 2;
+            if (s.bg() == BgType.MENU && s.menuTab() == 1) x = Math.min(x, menuRightColX() - 10 - cw);
             return Math.max(8, Math.min(width - cw - 8, x));
         }
-        if (s.pos() == CardPos.CENTER) {
-            int x = width / 2 - cw / 2;
-            if (s.bg() == BgType.MENU) x = Math.min(x, menuRightColX() - 10 - cw);
+        if (hl != null) {
+            int gap = 10;
+            int hlCenter = hl[0] + hl[2] / 2;
+            if (hlCenter < width / 2) return Math.max(8, Math.min(width - cw - 8, hl[0] + hl[2] + gap));
+            return Math.max(8, Math.min(width - cw - 8, hl[0] - cw - gap));
+        }
+        if (s.bg() == BgType.TRADE) {
+            int x = width / 2 + 88;
             return Math.max(8, Math.min(width - cw - 8, x));
         }
         if (s.bg() == BgType.MENU && s.menuTab() == 1 && rightColAvail() >= 120) return menuRightColX();
@@ -266,8 +365,42 @@ public class GatherTutorialScreen extends Screen {
     }
 
     private int targetCardY(int ch, Step s, int[] hl) {
+        if (compactTutorial()) {
+            if (s.bg() == BgType.CHEST_TOOLS)
+                return Math.max(8, height - ch - NAV_BTN_H - 16);
+            return Math.max(8, Math.min(height - ch - NAV_BTN_H - 16, 8));
+        }
+        if (s.bg() == BgType.CHEST_TOOLS) {
+            if (!menuIsCompact()) {
+                // Same Y logic as MENU steps
+                if (hl != null) {
+                    int below = hl[1] + hl[3] + 10;
+                    int above = hl[1] - ch - 10;
+                    if (below + ch <= height - 4) return below;
+                    if (above >= 4) return above;
+                }
+                return height / 2 - ch / 2;
+            }
+            if (hl != null) {
+                int below = hl[1] + hl[3] + 10;
+                int above = hl[1] - ch - 10;
+                if (below + ch <= height - NAV_BTN_H - 16) return below;
+                if (above >= 8) return above;
+            }
+            int panelY = chestToolsPanel(width, height)[1];
+            return Math.max(8, Math.min(height - ch - NAV_BTN_H - 16, panelY + 8));
+        }
+        if (s.pos() == CardPos.CENTER_TOP)    return Math.min(height / 2, height - ch - NAV_BTN_H - 16);
+        if (s.pos() == CardPos.CENTER_BOTTOM) return Math.max(8, height / 2 - ch);
         if (s.bg() == BgType.TRADE) return height / 2 - ch / 2;
         if (s.pos() == CardPos.CENTER) return height / 2 - ch / 2;
+        if (width < 720 && hl != null) {
+            int below = hl[1] + hl[3] + 6;
+            int above = hl[1] - ch - 6;
+            if (below + ch <= height - NAV_BTN_H - NAV_SCREEN_Y_PAD - 6) return below;
+            if (above >= 8) return above;
+            return Math.max(8, height - NAV_BTN_H - NAV_SCREEN_Y_PAD - ch - 8);
+        }
         if (s.bg() == BgType.MENU && s.menuTab() == 1 && rightColAvail() >= 120) {
             if (hl != null) {
                 int hlCy = hl[1] + hl[3] / 2;
@@ -305,6 +438,12 @@ public class GatherTutorialScreen extends Screen {
             embeddedMenu = new GatherMenuScreen(true);
             embeddedMenu.initForTutorial(width, height);
         }
+        if (embeddedChestTools == null || embeddedChestTools.width != width || embeddedChestTools.height != height) {
+            embeddedChestTools = new GatherChestToolsScreen(embeddedMenu);
+            embeddedChestTools.width = width;
+            embeddedChestTools.height = height;
+            embeddedChestTools.init();
+        }
         syncMenuTab();
         Step s   = STEPS[step];
         int cw   = cardWidth(s);
@@ -315,9 +454,14 @@ public class GatherTutorialScreen extends Screen {
         cardAnimStart = System.currentTimeMillis() - CARD_ANIM_MS;
     }
 
+    private boolean menuIsCompact() {
+        return GatherMenuScreen.isCompactChestTools(width, height);
+    }
+
     private void syncMenuTab() {
         Step s = STEPS[step];
         if (s.bg() == BgType.MENU) embeddedMenu.setTutorialTab(s.menuTab());
+        else if (s.bg() == BgType.CHEST_TOOLS && !menuIsCompact()) embeddedMenu.setTutorialTab(0);
     }
 
     private void goTo(int next) {
@@ -352,6 +496,13 @@ public class GatherTutorialScreen extends Screen {
 
         switch (s.bg()) {
             case MENU     -> { if (embeddedMenu != null) embeddedMenu.extractRenderState(ctx, -9999, -9999, delta); }
+            case CHEST_TOOLS -> {
+                if (menuIsCompact()) {
+                    if (embeddedChestTools != null) embeddedChestTools.extractRenderState(ctx, mx, my, delta);
+                } else {
+                    if (embeddedMenu != null) embeddedMenu.extractRenderState(ctx, -9999, -9999, delta);
+                }
+            }
             case CRAFTING -> drawCraftingMockup(ctx);
             case TRADE    -> drawTradeMockup(ctx);
             case SHULKER  -> drawShulkerMockup(ctx);
@@ -372,12 +523,17 @@ public class GatherTutorialScreen extends Screen {
         renderedCardY = (int) animatedCardY();
         renderedCardX = (int) animatedCardX();
         drawCard(ctx, s, mx, my, renderedCardX, renderedCardY, cw, ch);
+        drawNav(ctx, mx, my, navScreenX(), navScreenY());
     }
 
     // ── Spotlight ────────────────────────────────────────────────────────────
 
     private void drawSpotlight(GuiGraphicsExtractor ctx, int[] hl, long now) {
         int dark = 0xBB000000;
+        if (compactTutorial()) {
+            GatherTheme.fill(ctx, 0, 0, width, height, 0x99000000);
+            return;
+        }
         if (hl == null) { GatherTheme.fill(ctx, 0, 0, width, height, dark); return; }
 
         int pad = 5;
@@ -445,7 +601,8 @@ public class GatherTutorialScreen extends Screen {
 
         int panW = 186, panH = 132;
         int panX = bgX - panW - 8;
-        if (panX < 4) panX = bgX + 4;
+        if (panX < 4) panX = bgX + 176 + 8;
+        if (panX + panW > width - 4) panX = width - panW - 4;
         int panY = bgY + 18;
 
         drawCraftingPanel(ctx, panX, panY, panW, panH);
@@ -453,10 +610,10 @@ public class GatherTutorialScreen extends Screen {
         drawCraftingCloseButton(ctx, panX + panW - 15, panY + 5);
 
         Object[][] rows = {
-            { Items.OAK_PLANKS, "Oak Planks", "need 179  max 300" },
-            { Items.STICK, "Stick", "need 75  max 292" },
-            { Items.OAK_SLAB, "Oak Slab", "need 280  max 301" },
-            { Items.CRAFTING_TABLE, "Crafting Table", "need 1  max 1" },
+            { Items.IRON_INGOT,   "Iron Ingot",   "need 64  max 128" },
+            { Items.IRON_SWORD,   "Iron Sword",   "need 2   max 4"   },
+            { Items.CRAFTING_TABLE, "Crafting Table", "need 1  max 2" },
+            { Items.DIAMOND,      "Diamond",      "need 24  max 24"  },
         };
         int rowsTop = panY + 24;
         int rowY = rowsTop;
@@ -541,21 +698,21 @@ public class GatherTutorialScreen extends Screen {
         drawTradeCloseButton(ctx, panelX + panelW - 15, panelY + 5);
 
         drawTradeRow(ctx, panelX + 5, panelY + 24, true,
-                Items.EMERALD.getDefaultInstance(), Items.BOOK.getDefaultInstance(), Items.ENCHANTED_BOOK.getDefaultInstance(),
+                new net.minecraft.world.item.ItemStack(Items.EMERALD, 24), Items.BOOK.getDefaultInstance(), Items.ENCHANTED_BOOK.getDefaultInstance(),
                 "Mending Book");
         drawTradeRow(ctx, panelX + 5, panelY + 50, false,
-                Items.EMERALD.getDefaultInstance(), Items.REDSTONE.getDefaultInstance(), Items.COMPASS.getDefaultInstance(),
+                new net.minecraft.world.item.ItemStack(Items.EMERALD, 4), new net.minecraft.world.item.ItemStack(Items.REDSTONE, 8), Items.COMPASS.getDefaultInstance(),
                 "Compass");
         drawTradeRow(ctx, panelX + 5, panelY + 76, false,
-                Items.EMERALD.getDefaultInstance(), Items.ROTTEN_FLESH.getDefaultInstance(), Items.GOLDEN_APPLE.getDefaultInstance(),
+                new net.minecraft.world.item.ItemStack(Items.EMERALD, 16), new net.minecraft.world.item.ItemStack(Items.ROTTEN_FLESH, 32), Items.GOLDEN_APPLE.getDefaultInstance(),
                 "Golden Apple");
         int detailTop = panelY + 110;
         ctx.text(font, Component.literal("Want"), panelX + 6, detailTop + 4, 0xFF8899AA);
         drawTradeAmountField(ctx, panelX + 45, detailTop + 1);
-        ctx.text(font, Component.literal("64"), panelX + 104, detailTop + 4, 0xFFCCDDFF);
-        ctx.text(font, Component.literal("Trades 4  receive 64"), panelX + 6, detailTop + 19, 0xFF8899AA);
-        drawTradeCostSlot(ctx, panelX + 6, detailTop + 30, new net.minecraft.world.item.ItemStack(Items.EMERALD, 4));
-        drawTradeCostSlot(ctx, panelX + 42, detailTop + 30, new net.minecraft.world.item.ItemStack(Items.BOOK, 4));
+        ctx.text(font, Component.literal("Enchanted Book"), panelX + 104, detailTop + 4, 0xFFCCDDFF);
+        ctx.text(font, Component.literal("Trades needed: 3"), panelX + 6, detailTop + 19, 0xFF8899AA);
+        drawTradeCost(ctx, panelX + 6, detailTop + 28, new net.minecraft.world.item.ItemStack(Items.EMERALD, 72), 72);
+        drawTradeCost(ctx, panelX + 72, detailTop + 28, new net.minecraft.world.item.ItemStack(Items.BOOK, 3), 3);
 
         int btnW = 76;
         int btnH = 16;
@@ -598,7 +755,7 @@ public class GatherTutorialScreen extends Screen {
         drawSlot(ctx, x, y, 18);
         ctx.item(stack, x + 1, y + 1);
         if (!stack.isEmpty() && stack.getCount() > 1) {
-            ctx.text(font, Component.literal("x" + stack.getCount()), x + 1, y + 10, 0xFFFFFFFF);
+            ctx.text(font, Component.literal(String.valueOf(stack.getCount())), x + 1, y + 10, 0xFFFFFFFF);
         }
     }
 
@@ -617,7 +774,21 @@ public class GatherTutorialScreen extends Screen {
         GatherTheme.fill(ctx, x, y, x + 1, y + 14, 0xFF07111F);
         GatherTheme.fill(ctx, x + 51, y, x + 52, y + 14, 0xFF3A5570);
         GatherTheme.fill(ctx, x, y + 13, x + 52, y + 14, 0xFF3A5570);
-        ctx.centeredText(font, Component.literal("64"), x + 26, y + 3, 0xFFCCDDFF);
+        ctx.centeredText(font, Component.literal("3"), x + 26, y + 3, 0xFFCCDDFF);
+    }
+
+    private void drawTradeCost(GuiGraphicsExtractor ctx, int x, int y, net.minecraft.world.item.ItemStack stack, int count) {
+        net.minecraft.world.item.ItemStack iconStack = stack.copy();
+        iconStack.setCount(1);
+        drawTradeSlot(ctx, x, y, iconStack);
+        String label = compactTradeCount(count);
+        ctx.text(font, Component.literal(label), x + 18 - font.width(label), y + 10, 0xFFFFFFFF);
+    }
+
+    private static String compactTradeCount(int count) {
+        if (count < 1000) return Integer.toString(count);
+        if (count < 10000) return (count / 1000) + "k";
+        return "9k+";
     }
 
     private static final Identifier SHULKER_TEX =
@@ -686,53 +857,78 @@ public class GatherTutorialScreen extends Screen {
         ctx.centeredText(font, Component.literal(s.title()), cx, cardY + 8, 0xFF88CCFF);
         GatherTheme.fill(ctx, cardX + 10, cardY + 19, cardX + cardW - 10, cardY + 20, 0x33336699);
 
-        int lineY = cardY + 24;
+        List<FormattedCharSequence> bodyLines = new java.util.ArrayList<>();
         for (String line : s.lines()) {
-            List<FormattedCharSequence> wrapped = font.split(Component.literal(line), innerW);
-            for (FormattedCharSequence ot : wrapped) {
-                int tw = font.width(ot);
-                ctx.text(font, ot, cx - tw / 2, lineY, 0xFFAABBCC);
-                lineY += 11;
-            }
+            bodyLines.addAll(font.split(Component.literal(line), innerW));
         }
 
-        drawNav(ctx, mx, my, cardX, cardW, cardY + cardH - 22);
+        int bodyTop = cardY + 24;
+        boolean compact = compactTutorial();
+        int bodyBottom = cardY + cardH - (compact ? 20 : 8);
+        int bodyTextH = bodyLines.isEmpty() ? 0 : (bodyLines.size() - 1) * 11 + 8;
+        int lineY = bodyTop + Math.max(0, (bodyBottom - bodyTop - bodyTextH) / 2);
+        for (FormattedCharSequence ot : bodyLines) {
+            int tw = font.width(ot);
+            ctx.text(font, ot, cx - tw / 2, lineY, 0xFFAABBCC);
+            lineY += 11;
+        }
+        if (compact) {
+            Component notice = Component.literal("Best viewed at GUI Scale 5 or lower.");
+            ctx.centeredText(font, notice, cx, cardY + cardH - 14, 0xFFFFCC66);
+        }
+
     }
 
-    private void drawNav(GuiGraphicsExtractor ctx, int mx, int my, int cardX, int cardW, int navY) {
-        int cx      = cardX + cardW / 2;
+    private void drawNav(GuiGraphicsExtractor ctx, int mx, int my, int navX, int navY) {
         boolean hasPrev = step > 0;
         boolean isLast  = step == STEPS.length - 1;
+        int textY = navY + (NAV_BTN_H - 8) / 2;
 
         if (hasPrev) {
-            int bx = cardX + 10;
+            int bx = navX;
             boolean hov = hit(mx, my, bx, navY, NAV_BTN_W, NAV_BTN_H);
             GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + NAV_BTN_H, hov ? 0xFF223355 : 0xFF162035);
             GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + 1, 0xFF334466);
             ctx.centeredText(font, Component.literal("← Prev"),
-                    bx + NAV_BTN_W / 2, navY + 4, hov ? 0xFFCCDDFF : 0xFF778899);
+                    bx + NAV_BTN_W / 2, textY, hov ? 0xFFCCDDFF : 0xFF778899);
         }
 
         {
-            int bx = cx - NAV_BTN_W / 2;
+            int bx = navNextX();
             boolean hov = hit(mx, my, bx, navY, NAV_BTN_W, NAV_BTN_H);
             String label = isLast ? "Done" : "Next →";
             GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + NAV_BTN_H,
                     hov ? (isLast ? 0xFF004D42 : 0xFF223355) : (isLast ? 0xFF003D34 : 0xFF162035));
             GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + 1, isLast ? 0xFF00CC99 : 0xFF334466);
             ctx.centeredText(font, Component.literal(label),
-                    bx + NAV_BTN_W / 2, navY + 4,
+                    bx + NAV_BTN_W / 2, textY,
                     hov ? 0xFFFFFFFF : (isLast ? 0xFF33D6AA : 0xFFCCDDFF));
         }
 
         if (!isLast) {
-            int bx = cardX + cardW - NAV_BTN_W - 10;
+            int bx = navSkipX();
             boolean hov = hit(mx, my, bx, navY, NAV_BTN_W, NAV_BTN_H);
             GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + NAV_BTN_H, hov ? 0xFF221133 : 0xFF120A1A);
             GatherTheme.fill(ctx, bx, navY, bx + NAV_BTN_W, navY + 1, 0xFF442255);
             ctx.centeredText(font, Component.literal("Skip All"),
-                    bx + NAV_BTN_W / 2, navY + 4, hov ? 0xFFCC88FF : 0xFF664488);
+                    bx + NAV_BTN_W / 2, textY, hov ? 0xFFCC88FF : 0xFF664488);
         }
+    }
+
+    private int navScreenX() {
+        return NAV_SCREEN_X;
+    }
+
+    private int navScreenY() {
+        return height - NAV_SCREEN_Y_PAD - NAV_BTN_H;
+    }
+
+    private int navNextX() {
+        return navScreenX() + NAV_BTN_W + 6;
+    }
+
+    private int navSkipX() {
+        return navNextX() + NAV_BTN_W + 6;
     }
 
     // ── Input ────────────────────────────────────────────────────────────────
@@ -741,17 +937,17 @@ public class GatherTutorialScreen extends Screen {
     public boolean mouseClicked(MouseButtonEvent click, boolean focused) {
         if (click.button() != 0) return false;
         double mx = click.x(), my = click.y();
-        int navY    = renderedCardY + renderedCardH - 22;
+        int navY    = navScreenY();
         boolean hasPrev = step > 0;
         boolean isLast  = step == STEPS.length - 1;
 
-        if (hasPrev && hit(mx, my, renderedCardX + 10, navY, NAV_BTN_W, NAV_BTN_H)) {
+        if (hasPrev && hit(mx, my, navScreenX(), navY, NAV_BTN_W, NAV_BTN_H)) {
             goTo(step - 1); return true;
         }
-        if (hit(mx, my, renderedCardX + renderedCardW / 2 - NAV_BTN_W / 2, navY, NAV_BTN_W, NAV_BTN_H)) {
+        if (hit(mx, my, navNextX(), navY, NAV_BTN_W, NAV_BTN_H)) {
             goTo(step + 1); return true;
         }
-        if (!isLast && hit(mx, my, renderedCardX + renderedCardW - NAV_BTN_W - 10, navY, NAV_BTN_W, NAV_BTN_H)) {
+        if (!isLast && hit(mx, my, navSkipX(), navY, NAV_BTN_W, NAV_BTN_H)) {
             finish(); return true;
         }
         return false;

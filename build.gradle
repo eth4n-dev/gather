@@ -3,7 +3,7 @@ plugins {
     id 'maven-publish'
 }
 
-version = "26.1+${project.mod_version}"
+version = "26.1.x+${project.mod_version}"
 group = project.maven_group
 
 base { archivesName = project.archives_base_name }
@@ -41,9 +41,9 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 processResources {
-    inputs.property "version", project.mod_version
+    inputs.property "version", project.version
     filteringCharset "UTF-8"
     filesMatching("fabric.mod.json") {
-        expand "version": project.mod_version
+        expand "version": project.version
     }
 }

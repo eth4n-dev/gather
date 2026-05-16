@@ -26,7 +26,7 @@ public class GatherMenuScreen extends Screen {
 
     // ─── LAYOUT ──────────────────────────────────────────────────────────────
     private static final int ENTRY_H   = 32;
-    private static final int LIST_W    = 340;
+    private static final int LIST_W    = 300;
     private static final int PAD       = 6;
     private static final int ICON      = 16;
     private static final int BOTTOM_H  = 28;
@@ -76,7 +76,7 @@ public class GatherMenuScreen extends Screen {
     private int              addScroll        = 0;
     private int              addModeToggleX, addModeToggleY; // set during renderAddTab
     private int              favoriteStarX, favoriteStarY, favoriteStarSize;
-    private int              newListBtnX,    newListBtnY;    // set during renderListTab
+    private int              newListBtnX,    newListBtnY,    newListBtnW;    // set during renderListTab
     private int              chestModeBtnX,  chestModeBtnY, chestModeBtnW; // set during renderListTab
     private int              clearChestsBtnX, clearChestsBtnY, clearChestsBtnW; // set during renderListTab
     private int              clearManualBtnX, clearManualBtnY, clearManualBtnW; // set during renderListTab
@@ -84,7 +84,10 @@ public class GatherMenuScreen extends Screen {
     private int              outlinesBtnX,   outlinesBtnY,   outlinesBtnW;      // set during renderListTab
     private int              finderBtnX,     finderBtnY,     finderBtnW;        // set during renderListTab
     private boolean          finderBtnEnabled;
+    public static int renderedOutlinesBtnY = 0;
+    public static int renderedFinderBtnY   = 0;
     private int              rescanBtnX,     rescanBtnY,     rescanBtnW;        // set during renderListTab
+    private int              chestToolsBtnX, chestToolsBtnY, chestToolsBtnW;
     private int              rescanFeedbackTicks = 0;
     private int              enableGatherBtnX, enableGatherBtnY, enableGatherBtnW, enableGatherBtnH;
 
@@ -361,11 +364,14 @@ public class GatherMenuScreen extends Screen {
         // === LEFT PANEL ===
         if (suppressBottomBar) {
             clearSideControlHitboxes();
+        } else if (useCompactChestTools(lx)) {
+            renderCompactChestTools(ctx, mx, my, lx, ly);
         } else {
         int leftCx = lx / 2;
         int panelTop = ly;
         int panelBot = height - BOTTOM_H;
         int panelMid = (panelTop + panelBot) / 2;
+        int sideMaxW = Math.max(36, lx - 10);
 
         // --- Upper half: Chest Scan section ---
         GatherState gstate = state;
@@ -376,14 +382,15 @@ public class GatherMenuScreen extends Screen {
         int scanY = panelTop + 8;
 
         // Section header
-        String chestSectionLabel = "CHEST SCANNING";
+        String chestSectionLabel = sideMaxW < font.width("CHEST SCANNING") ? "CHESTS" : "CHEST SCANNING";
         drawThemedText(ctx, Component.literal(chestSectionLabel),
                 leftCx - font.width(chestSectionLabel) / 2, scanY, GatherTheme.textMuted());
         scanY += 14;
 
         // Scan All Chests button (primary, always on top)
-        String atLabel = countCached ? "Scan All Chests: ON" : "Scan All Chests: OFF";
-        autoTrackBtnW = Math.max(SIDE_TOGGLE_W, font.width("Scan All Chests: OFF") + 12);
+        String atBase = sideMaxW < font.width("Scan All Chests: OFF") + 12 ? "Scan All" : "Scan All Chests";
+        String atLabel = atBase + ": " + (countCached ? "ON" : "OFF");
+        autoTrackBtnW = Math.min(sideMaxW, Math.max(SIDE_TOGGLE_W, font.width("Scan All: OFF") + 12));
         autoTrackBtnX = leftCx - autoTrackBtnW / 2;
         autoTrackBtnY = scanY;
         boolean atHov = mx >= autoTrackBtnX && mx <= autoTrackBtnX + autoTrackBtnW
@@ -441,23 +448,19 @@ public class GatherMenuScreen extends Screen {
 
             int unloadedTracked = minecraft != null && minecraft.level != null
                     ? gstate.getUnloadedTrackedChestCount(minecraft.level) : 0;
-            drawThemedText(ctx, Component.literal("Scans nearby loaded chests."),
-                    leftCx - font.width("Scans nearby loaded chests.") / 2, scanY, GatherTheme.textMuted());
+            drawCenteredClamped(ctx, "Scans nearby loaded chests.", leftCx, scanY, sideMaxW, GatherTheme.textMuted());
             scanY += 10;
-            drawThemedText(ctx, Component.literal("Only opened chests are tracked."),
-                    leftCx - font.width("Only opened chests are tracked.") / 2, scanY, GatherTheme.textMuted());
+            drawCenteredClamped(ctx, "Only opened chests are tracked.", leftCx, scanY, sideMaxW, GatherTheme.textMuted());
             scanY += 10;
             if (unloadedTracked > 0) {
                 String oob = unloadedTracked + " chest" + (unloadedTracked == 1 ? "" : "s") + " out of range.";
                 drawThemedText(ctx, Component.literal(oob),
                         leftCx - font.width(oob) / 2, scanY, 0xFFFF9944);
                 scanY += 10;
-                drawThemedText(ctx, Component.literal("Saved contents shown when nearby."),
-                        leftCx - font.width("Saved contents shown when nearby.") / 2, scanY, GatherTheme.textMuted());
+                drawCenteredClamped(ctx, "Saved contents shown when nearby.", leftCx, scanY, sideMaxW, GatherTheme.textMuted());
                 scanY += 12;
             } else {
-                drawThemedText(ctx, Component.literal("Saved after unload."),
-                        leftCx - font.width("Saved after unload.") / 2, scanY, GatherTheme.textMuted());
+                drawCenteredClamped(ctx, "Saved after unload.", leftCx, scanY, sideMaxW, GatherTheme.textMuted());
                 scanY += 12;
             }
 
@@ -466,13 +469,13 @@ public class GatherMenuScreen extends Screen {
         } else {
             clearChestsBtnW = 0;
             rescanBtnW = 0;
-            drawThemedText(ctx, Component.literal("Only inventory counts now."),
-                    leftCx - font.width("Only inventory counts now.") / 2, scanY, GatherTheme.textMuted());
+            drawCenteredClamped(ctx, "Only inventory counts now.", leftCx, scanY, sideMaxW, GatherTheme.textMuted());
             scanY += 18;
 
             // Manual Scan button (only shown when Scan All is OFF)
-            String cmLabel = scanMode ? "Manual Scan: ON" : "Manual Scan: OFF";
-            chestModeBtnW = Math.max(SIDE_TOGGLE_W, font.width("Manual Scan: OFF") + 12);
+            String cmBase = sideMaxW < font.width("Manual Scan: OFF") + 12 ? "Manual" : "Manual Scan";
+            String cmLabel = cmBase + ": " + (scanMode ? "ON" : "OFF");
+            chestModeBtnW = Math.min(sideMaxW, Math.max(SIDE_TOGGLE_W, font.width("Manual: OFF") + 12));
             chestModeBtnX = leftCx - chestModeBtnW / 2;
             chestModeBtnY = scanY;
             boolean cmHov = mx >= chestModeBtnX && mx <= chestModeBtnX + chestModeBtnW
@@ -488,8 +491,7 @@ public class GatherMenuScreen extends Screen {
             scanY += 17;
 
             if (scanMode) {
-                drawThemedText(ctx, Component.literal("Right-click chests to tag / untag."),
-                        leftCx - font.width("Right-click chests to tag / untag.") / 2, scanY, 0xFFBB9955);
+                drawCenteredClamped(ctx, "Right-click chests to tag / untag.", leftCx, scanY, sideMaxW, 0xFFBB9955);
                 scanY += 11;
             }
 
@@ -524,10 +526,12 @@ public class GatherMenuScreen extends Screen {
             final int BTN_H = 13;
             scanY += 4;
             boolean outOn = GatherSettings.get().chestOutlinesEnabled;
-            String outLabel = "Chest Outlines: " + (outOn ? "ON" : "OFF");
-            outlinesBtnW = Math.max(SIDE_TOGGLE_W, font.width("Chest Outlines: OFF") + 14);
+            String outBase = sideMaxW < font.width("Chest Outlines: OFF") + 14 ? "Outlines" : "Chest Outlines";
+            String outLabel = outBase + ": " + (outOn ? "ON" : "OFF");
+            outlinesBtnW = Math.min(sideMaxW, Math.max(SIDE_TOGGLE_W, font.width("Outlines: OFF") + 14));
             outlinesBtnX = leftCx - outlinesBtnW / 2;
             outlinesBtnY = scanY;
+            renderedOutlinesBtnY = outlinesBtnY;
             boolean outHov = mx >= outlinesBtnX && mx <= outlinesBtnX + outlinesBtnW
                           && my >= outlinesBtnY && my <= outlinesBtnY + BTN_H;
             drawSideButtonFrame(ctx, outlinesBtnX, outlinesBtnY, outlinesBtnW, BTN_H,
@@ -548,6 +552,7 @@ public class GatherMenuScreen extends Screen {
             finderBtnW = Math.max(SIDE_SMALL_W - 12, font.width("Find Item...") + 2);
             finderBtnX = leftCx - finderBtnW / 2;
             finderBtnY = scanY;
+            renderedFinderBtnY = finderBtnY;
             boolean fHov = finderBtnEnabled
                     && mx >= finderBtnX && mx <= finderBtnX + finderBtnW
                     && my >= finderBtnY && my <= finderBtnY + FINDER_H;
@@ -566,6 +571,7 @@ public class GatherMenuScreen extends Screen {
         boolean atCap = state.getListCount() >= 10;
         newListBtnX = leftCx - TOGGLE_W / 2;
         newListBtnY = listSectionCY - TOGGLE_H / 2;
+        newListBtnW = TOGGLE_W;
         String listLabel = "My Lists (" + state.getListCount() + "/10)";
         drawThemedText(ctx, Component.literal(listLabel),
                 leftCx - font.width(listLabel) / 2, newListBtnY - 14, GatherTheme.textSecondary());
@@ -641,6 +647,8 @@ public class GatherMenuScreen extends Screen {
 
     private void clearSideControlHitboxes() {
         newListBtnX = newListBtnY = -1000;
+        newListBtnW = 0;
+        chestToolsBtnW = 0;
         chestModeBtnW = 0;
         clearChestsBtnW = 0;
         clearManualBtnW = 0;
@@ -649,6 +657,51 @@ public class GatherMenuScreen extends Screen {
         finderBtnW = 0;
         rescanBtnW = 0;
         finderBtnEnabled = false;
+    }
+
+    private boolean useCompactChestTools(int lx) {
+        return isCompactChestTools(width, height);
+    }
+
+    public static boolean isCompactChestTools(int screenW, int screenH) {
+        return screenW / 2 - LIST_W / 2 < 118 || screenH < 260;
+    }
+
+    private void renderCompactChestTools(GuiGraphicsExtractor ctx, int mx, int my, int lx, int ly) {
+        clearSideControlHitboxes();
+        int leftW = Math.max(0, lx - 6);
+        int btnW = Math.min(96, Math.max(72, leftW - 8));
+        if (btnW <= 0) return;
+        int leftCx = Math.max(4, lx / 2);
+        chestToolsBtnW = btnW;
+        chestToolsBtnX = Math.max(4, leftCx - btnW / 2);
+        chestToolsBtnY = ly + 24;
+        boolean hov = mx >= chestToolsBtnX && mx <= chestToolsBtnX + chestToolsBtnW
+                && my >= chestToolsBtnY && my <= chestToolsBtnY + TOGGLE_H;
+        drawThemedText(ctx, Component.literal("CHESTS"),
+                leftCx - font.width("CHESTS") / 2, ly + 8, GatherTheme.textMuted());
+        drawMenuButtonFrame(ctx, chestToolsBtnX, chestToolsBtnY, chestToolsBtnW, TOGGLE_H, hov, false, false, false);
+        drawThemedText(ctx, Component.literal("Tools"),
+                chestToolsBtnX + (chestToolsBtnW - font.width("Tools")) / 2,
+                chestToolsBtnY + 6, GatherTheme.textButton());
+        if (hov) ctx.requestCursor(CursorTypes.POINTING_HAND);
+
+        // Goal Lists section below chest button
+        int listY = chestToolsBtnY + TOGGLE_H + 14;
+        drawThemedText(ctx, Component.literal("LISTS"),
+                leftCx - font.width("LISTS") / 2, listY, GatherTheme.textMuted());
+        listY += 12;
+        boolean atCap = GatherState.get().getListCount() >= 10;
+        newListBtnW = btnW;
+        newListBtnX = Math.max(4, leftCx - btnW / 2);
+        newListBtnY = listY;
+        boolean nlHov = !atCap && mx >= newListBtnX && mx <= newListBtnX + newListBtnW
+                && my >= newListBtnY && my <= newListBtnY + TOGGLE_H;
+        drawMenuButtonFrame(ctx, newListBtnX, newListBtnY, newListBtnW, TOGGLE_H, nlHov, false, atCap, false);
+        drawThemedText(ctx, Component.literal("+ New List"),
+                newListBtnX + (newListBtnW - font.width("+ New List")) / 2,
+                newListBtnY + 6, atCap ? GatherTheme.textDisabled() : GatherTheme.textButton());
+        if (nlHov) ctx.requestCursor(CursorTypes.POINTING_HAND);
     }
 
     private void renderHeaderRow(GuiGraphicsExtractor ctx, int mx, int my, int lx, int y, int listIndex) {
@@ -940,7 +993,8 @@ public class GatherMenuScreen extends Screen {
         addModeToggleX   = rightPanelCx - TOGGLE_W / 2;
         addModeToggleY   = height / 2 - TOGGLE_H / 2;
 
-        String topLabel = "Add goal as:";
+        int rightAvail = Math.max(40, width - (lx + LIST_W) - 8);
+        String topLabel = rightAvail < 120 ? "Add as:" : "Add goal as:";
         drawThemedText(ctx, Component.literal(topLabel),
                 rightPanelCx - font.width(topLabel) / 2, addModeToggleY - 14, GatherTheme.textSecondary());
 
@@ -955,13 +1009,11 @@ public class GatherMenuScreen extends Screen {
         drawThemedText(ctx, Component.literal(modeLabel),
                 rightPanelCx - mlW / 2, addModeToggleY + 6, GatherTheme.textButton());
 
-        String desc1 = modeTotal ? "Set a total target count." : "Add N more items to gather.";
-        String desc2 = modeTotal ? "Existing items count toward it." : "Ignores what you already have.";
+        String desc1 = modeTotal ? "Set total target." : "Add N more.";
+        String desc2 = modeTotal ? "Counts existing." : "Ignores existing.";
         int descY = addModeToggleY + TOGGLE_H + 8;
-        ctx.text(font, Component.literal(desc1),
-                rightPanelCx - font.width(desc1) / 2, descY,      GatherTheme.textMuted());
-        ctx.text(font, Component.literal(desc2),
-                rightPanelCx - font.width(desc2) / 2, descY + 12, GatherTheme.textMuted());
+        drawCenteredClamped(ctx, desc1, rightPanelCx, descY, rightAvail, GatherTheme.textMuted());
+        drawCenteredClamped(ctx, desc2, rightPanelCx, descY + 12, rightAvail, GatherTheme.textMuted());
     }
 
     private void renderAddTab(GuiGraphicsExtractor ctx, int mx, int my, int lx, int ly) {
@@ -992,7 +1044,9 @@ public class GatherMenuScreen extends Screen {
             boolean hov = mx>=lx && mx<=lx+LIST_W && my>=y && my<=y+ENTRY_H-2;
             drawMenuRow(ctx, lx, y, LIST_W, ENTRY_H - 2, hov, false, false);
             ctx.item(item.getDefaultInstance(), lx+2, y+(ENTRY_H-2-ICON)/2);
-            drawThemedText(ctx, com.gather.client.GatherUi.itemName(item), lx+ICON+6, y+10, GatherTheme.textPrimary());
+            int nameX = lx + ICON + 6;
+            String itemName = font.plainSubstrByWidth(com.gather.client.GatherUi.itemName(item).getString(), Math.max(20, favoriteStarX - nameX - 8));
+            drawThemedText(ctx, Component.literal(itemName), nameX, y+10, GatherTheme.textPrimary());
             if (hov) ctx.requestCursor(CursorTypes.POINTING_HAND);
 
             if (already > 0) {
@@ -1001,7 +1055,7 @@ public class GatherMenuScreen extends Screen {
                         favoriteStarX - 4 - font.width(cs), y+10, 0xFF66FF88);
             }
 
-            int rowStarY = y + 7;
+            int rowStarY = addRowStarY(y);
             boolean fav = GatherSettings.get().isFavoriteItem(id);
             boolean starHov = mx >= favoriteStarX && mx <= favoriteStarX + favoriteStarSize
                     && my >= rowStarY && my <= rowStarY + favoriteStarSize;
@@ -1013,7 +1067,7 @@ public class GatherMenuScreen extends Screen {
             if (id.equals(addFocusedItemId)) {
                 addAmountField.setX(fieldX); addAmountField.setY(y+7);
                 addAmountField.setWidth(fieldW); addAmountField.setVisible(true);
-                favoriteStarY = y + 7;
+                favoriteStarY = rowStarY;
                 ctx.text(font, Component.literal("↵"), fieldX+fieldW+3, y+10, 0xFF556644);
                 if (GatherSettings.get().countExistingOnAdd) {
                     int have = countForId(id);
@@ -1025,7 +1079,7 @@ public class GatherMenuScreen extends Screen {
                 }
             } else {
                 GatherTheme.drawNineSlice(ctx, GatherTheme.MENU_BUTTON_DISABLED, fieldX, y + 6, fieldW, 14);
-                drawThemedText(ctx, Component.literal("amount…"), fieldX+4, y+9, GatherTheme.textMuted());
+                drawCentered(ctx, fieldW < 50 ? "amt" : "amt...", fieldX, y + 6, fieldW, 14, GatherTheme.textMuted());
             }
         }
         if (addFocusedItemId != null) addAmountField.extractWidgetRenderState(ctx, mx, my, 0.0F);
@@ -1183,10 +1237,18 @@ public class GatherMenuScreen extends Screen {
             if (mx>=setX && mx<=setX+btnW) { GatherUi.playClickSound(); minecraft.setScreen(new GatherSettingsScreen(this)); return true; }
         }
 
+        if (activeTab == TAB_LIST && chestToolsBtnW > 0
+                && my >= chestToolsBtnY && my <= chestToolsBtnY + TOGGLE_H
+                && mx >= chestToolsBtnX && mx <= chestToolsBtnX + chestToolsBtnW) {
+            GatherUi.playClickSound();
+            minecraft.setScreen(new GatherChestToolsScreen(this));
+            return true;
+        }
+
         // + New List button (list tab, left panel)
         if (activeTab == TAB_LIST
                 && my >= newListBtnY && my <= newListBtnY + TOGGLE_H
-                && mx >= newListBtnX && mx <= newListBtnX + TOGGLE_W
+                && mx >= newListBtnX && mx <= newListBtnX + newListBtnW
                 && GatherState.get().getListCount() < 10) {
             GatherUi.playClickSound();
             GatherState.get().addList("List " + (GatherState.get().getListCount() + 1));
@@ -1456,7 +1518,7 @@ public class GatherMenuScreen extends Screen {
             int  y    = itemsTop+i*ENTRY_H;
             if (my<y||my>y+ENTRY_H-2||mx<lx||mx>lx+LIST_W) continue;
             String id = BuiltInRegistries.ITEM.getKey(item).toString();
-            int rowStarY = y + 7;
+            int rowStarY = addRowStarY(y);
             if (mx >= favoriteStarX && mx <= favoriteStarX + favoriteStarSize
                     && my >= rowStarY && my <= rowStarY + favoriteStarSize) {
                 GatherUi.playClickSound();
@@ -1475,6 +1537,10 @@ public class GatherMenuScreen extends Screen {
         }
         if (addFocusedItemId != null) commitAddAmount();
         return false;
+    }
+
+    private int addRowStarY(int rowY) {
+        return rowY + (ENTRY_H - 2 - favoriteStarSize) / 2 + 1;
     }
 
     // ─── DRAG & DROP ─────────────────────────────────────────────────────────
@@ -1977,8 +2043,14 @@ public class GatherMenuScreen extends Screen {
     }
 
     private void drawCentered(GuiGraphicsExtractor ctx, String label, int x, int y, int w, int h, int color) {
+        label = font.plainSubstrByWidth(label, Math.max(1, w - 4));
         drawThemedText(ctx, Component.literal(label),
                 x + (w - font.width(label)) / 2, y + (h - 8) / 2 + 1, color);
+    }
+
+    private void drawCenteredClamped(GuiGraphicsExtractor ctx, String label, int cx, int y, int maxW, int color) {
+        String fit = font.plainSubstrByWidth(label, Math.max(1, maxW));
+        drawThemedText(ctx, Component.literal(fit), cx - font.width(fit) / 2, y, color);
     }
 
     private void drawThemedText(GuiGraphicsExtractor ctx, Component text, int x, int y, int color) {

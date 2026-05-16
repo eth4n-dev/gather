@@ -3,6 +3,7 @@ package com.gather.client.screen;
 import com.gather.client.GatherTheme;
 import com.gather.client.GatherSettings;
 import com.gather.client.GatherState;
+import com.gather.client.WorldHighlightRenderer;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.components.Button;
@@ -39,6 +40,7 @@ public class GatherXraySettingsScreen extends Screen {
         Button blockXray = Button
                 .builder(stateText("Block Xray", GatherSettings.get().blockXray), btn -> {
                     GatherSettings.get().blockXray = !GatherSettings.get().blockXray;
+                    WorldHighlightRenderer.invalidateCache();
                     GatherSettings.get().save();
                     btn.setMessage(stateText("Block Xray", GatherSettings.get().blockXray));
                 })

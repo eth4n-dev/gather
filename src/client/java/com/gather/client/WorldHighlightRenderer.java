@@ -87,6 +87,7 @@ public class WorldHighlightRenderer {
     private static ChunkKey lastVerticalExpandChunk = null;
     private static long currentChunkEnteredAtMs = 0L;
     private static long highlightRampStartedAtMs = 0L;
+    private static Boolean cachedBlockXrayMode = null;
     private static ScanJob scanJob = null;
     private static final Map<SectionKey, SectionScanCache> sectionScanCache = new HashMap<>();
     private static final Map<Long, ChestXrayCache> chestXrayCache = new HashMap<>();
@@ -112,7 +113,7 @@ public class WorldHighlightRenderer {
 
     private record SectionKey(int x, int y, int z) {}
     private record ChunkKey(int x, int z) {}
-    private record SectionScanCache(int neededHash, long scannedAtMs, List<BlockPos> positions) {}
+    private record SectionScanCache(int neededHash, boolean exposedOnly, long scannedAtMs, List<BlockPos> positions) {}
     private record ScanJob(BlockPos origin, int radius, int verticalRadius, int neededHash,
                            Deque<SectionKey> pending, List<BlockPos> highlights, Set<Long> highlightSet) {}
     private record ChestXrayCache(BlockPos pos, AABB bounds, long validatedAtMs, boolean valid, boolean isCollector, boolean animating) {}
@@ -136,6 +137,7 @@ public class WorldHighlightRenderer {
         lastVerticalExpandChunk = null;
         currentChunkEnteredAtMs = 0L;
         highlightRampStartedAtMs = 0L;
+        cachedBlockXrayMode = null;
         lastHighlightValidatedMs = 0L;
         lastSectionCachePruneMs = 0L;
         scanJob = null;
@@ -766,16 +768,13 @@ public class WorldHighlightRenderer {
 
         BlockPos playerPos = minecraft.player.blockPosition();
         long now = System.currentTimeMillis();
+        syncBlockXrayScanMode(true);
         updateScanJobForPlayer(playerPos, now, cachedHighlights == null);
         processScanJob(world, cachedNeededBlocks);
         if (cachedHighlights == null || cachedHighlights.isEmpty()) return;
         if (now - lastHighlightValidatedMs > HIGHLIGHT_VALIDATE_INTERVAL_MS) {
             lastHighlightValidatedMs = now;
-            cachedHighlights.removeIf(pos -> !cachedNeededBlocks.contains(world.getBlockState(pos).getBlock()));
-            retainSetBuf.clear();
-            for (BlockPos pos : cachedHighlights) retainSetBuf.add(pos.asLong());
-            highlightShapeCache.keySet().retainAll(retainSetBuf);
-            retainSetBuf.clear();
+            pruneCachedHighlights(world, cachedNeededBlocks, false);
         }
         if (cachedHighlights.isEmpty()) return;
 
@@ -829,18 +828,16 @@ public class WorldHighlightRenderer {
 
         BlockPos playerPos = minecraft.player.blockPosition();
         long now = System.currentTimeMillis();
+        syncBlockXrayScanMode(false);
         updateScanJobForPlayer(playerPos, now, cachedHighlights == null);
+        pruneCachedHighlights(world, cachedNeededBlocks, true);
         processScanJob(world, cachedNeededBlocks);
 
         if (cachedHighlights == null || cachedHighlights.isEmpty()) return;
 
         if (now - lastHighlightValidatedMs > HIGHLIGHT_VALIDATE_INTERVAL_MS) {
             lastHighlightValidatedMs = now;
-            cachedHighlights.removeIf(pos -> !cachedNeededBlocks.contains(world.getBlockState(pos).getBlock()));
-            retainSetBuf.clear();
-            for (BlockPos pos : cachedHighlights) retainSetBuf.add(pos.asLong());
-            highlightShapeCache.keySet().retainAll(retainSetBuf);
-            retainSetBuf.clear();
+            pruneCachedHighlights(world, cachedNeededBlocks, true);
         }
 
         if (cachedHighlights.isEmpty()) return;
@@ -856,7 +853,7 @@ public class WorldHighlightRenderer {
         };
         VertexConsumer consumer = consumers.getBuffer(RenderTypes.LINES);
 
-        for (BlockPos pos : visibleHighlights()) {
+        for (BlockPos pos : visibleHighlights(world)) {
             matrices.pushPose();
             matrices.translate(pos.getX() - camPos.x, pos.getY() - camPos.y, pos.getZ() - camPos.z);
             matrices.translate(-OUTLINE_EPSILON, -OUTLINE_EPSILON, -OUTLINE_EPSILON);
@@ -1020,6 +1017,7 @@ public class WorldHighlightRenderer {
         if (scanJob == null) return;
         int budget = Math.max(1, GatherSettings.get().highlightScanBudget);
         long now = System.currentTimeMillis();
+        boolean exposedOnly = !GatherSettings.get().blockXray;
         pruneSectionScanCache(now);
         for (int i = 0; i < budget && !scanJob.pending().isEmpty(); i++) {
             SectionKey section = scanJob.pending().removeFirst();
@@ -1028,15 +1026,17 @@ public class WorldHighlightRenderer {
             List<BlockPos> positions;
             if (cached != null
                     && cached.neededHash() == scanJob.neededHash()
+                    && cached.exposedOnly() == exposedOnly
                     && now - cached.scannedAtMs() < SECTION_CACHE_TTL_MS) {
                 positions = cached.positions();
             } else {
-                positions = scanSection(world, section, neededBlocks);
-                sectionScanCache.put(section, new SectionScanCache(scanJob.neededHash(), now, positions));
+                positions = scanSection(world, section, neededBlocks, exposedOnly);
+                sectionScanCache.put(section, new SectionScanCache(scanJob.neededHash(), exposedOnly, now, positions));
             }
             addPositionsInRadius(scanJob.highlights(), positions, scanJob.origin(),
                     scanJob.radius(), scanJob.verticalRadius(), scanJob.highlightSet());
         }
+        pruneCachedHighlights(world, neededBlocks, exposedOnly);
         applyHighlightLimit(scanJob.highlights(), scanJob.highlightSet(), scanJob.origin());
         cachedHighlights = scanJob.highlights();
         if (scanJob.pending().isEmpty()) scanJob = null;
@@ -1048,7 +1048,8 @@ public class WorldHighlightRenderer {
         sectionScanCache.entrySet().removeIf(entry -> now - entry.getValue().scannedAtMs() >= SECTION_CACHE_TTL_MS);
     }
 
-    private static List<BlockPos> scanSection(ClientLevel world, SectionKey section, Set<Block> neededBlocks) {
+    private static List<BlockPos> scanSection(ClientLevel world, SectionKey section,
+                                              Set<Block> neededBlocks, boolean exposedOnly) {
         List<BlockPos> result = new ArrayList<>();
         int minX = section.x() * 16;
         int maxX = minX + 15;
@@ -1061,13 +1062,38 @@ public class WorldHighlightRenderer {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
                     mutable.set(x, y, z);
-                    if (neededBlocks.contains(world.getBlockState(mutable).getBlock())) {
+                    if (neededBlocks.contains(world.getBlockState(mutable).getBlock())
+                            && (!exposedOnly || !isHiddenUnderground(world, mutable))) {
                         result.add(mutable.immutable());
                     }
                 }
             }
         }
         return result;
+    }
+
+    private static void syncBlockXrayScanMode(boolean blockXray) {
+        if (cachedBlockXrayMode != null && cachedBlockXrayMode == blockXray) return;
+        cachedBlockXrayMode = blockXray;
+        cachedHighlights = null;
+        scanJob = null;
+        sectionScanCache.clear();
+        highlightShapeCache.clear();
+        highlightRampStartedAtMs = 0L;
+        lastHighlightValidatedMs = 0L;
+        lastScanTime = 0L;
+        retainSetBuf.clear();
+    }
+
+    private static void pruneCachedHighlights(ClientLevel world, Set<Block> neededBlocks, boolean exposedOnly) {
+        if (cachedHighlights == null || cachedHighlights.isEmpty()) return;
+        cachedHighlights.removeIf(pos -> !neededBlocks.contains(world.getBlockState(pos).getBlock())
+                || (exposedOnly && isHiddenUnderground(world, pos)));
+        retainSetBuf.clear();
+        for (BlockPos pos : cachedHighlights) retainSetBuf.add(pos.asLong());
+        if (scanJob != null) scanJob.highlightSet().retainAll(retainSetBuf);
+        highlightShapeCache.keySet().retainAll(retainSetBuf);
+        retainSetBuf.clear();
     }
 
     private static void addPositionsInRadius(List<BlockPos> result, List<BlockPos> positions,
@@ -1101,6 +1127,27 @@ public class WorldHighlightRenderer {
         int limit = currentVisibleHighlightLimit();
         if (limit >= cachedHighlights.size()) return cachedHighlights;
         return cachedHighlights.subList(0, limit);
+    }
+
+    private static List<BlockPos> visibleHighlights(ClientLevel world) {
+        if (cachedHighlights == null || cachedHighlights.isEmpty()) return List.of();
+        if (GatherSettings.get().blockXray) return visibleHighlights();
+        int limit = currentVisibleHighlightLimit();
+        List<BlockPos> exposed = new ArrayList<>();
+        for (BlockPos pos : cachedHighlights) {
+            if (!isHiddenUnderground(world, pos)) {
+                exposed.add(pos);
+                if (exposed.size() >= limit) break;
+            }
+        }
+        return exposed;
+    }
+
+    private static boolean isHiddenUnderground(ClientLevel world, BlockPos pos) {
+        for (Direction dir : Direction.values()) {
+            if (!world.getBlockState(pos.relative(dir)).canOcclude()) return false;
+        }
+        return true;
     }
 
     private static int currentVisibleHighlightLimit() {

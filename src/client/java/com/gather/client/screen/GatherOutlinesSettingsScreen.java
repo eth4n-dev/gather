@@ -13,18 +13,18 @@ import java.util.List;
 
 public class GatherOutlinesSettingsScreen extends Screen {
     private static final int MIN_RADIUS = 8;
-    private static final int MAX_RADIUS = 128;
+    private static final int MAX_RADIUS = 256;
     private static final int MIN_OUTLINES = 8;
-    private static final int MAX_OUTLINES = 512;
+    private static final int MAX_OUTLINES = 1052;
     private static final String[] LOAD_LABELS = {
             "Slowest", "Slower", "Slow", "Normal", "Fast", "Ultra Fast", "Ultra Duper Fast"
     };
     private static final int[] LOAD_SECONDS = {12, 8, 6, 4, 3, 2, 1};
-    private static final String[] PRESET_LABELS = {"Performance", "Balanced", "Fancy", "Extreme"};
-    private static final int[] PRESET_BUDGETS = {2, 4, 6, 10};
-    private static final int[] PRESET_RADII = {8, 32, 64, 128};
-    private static final int[] PRESET_MAX_OUTLINES = {32, 100, 200, 512};
-    private static final int[] PRESET_RAMP_SECONDS = {12, 6, 3, 1};
+    private static final String[] PRESET_LABELS = {"Performance", "Balanced", "Quality", "Fancy", "Extreme"};
+    private static final int[] PRESET_BUDGETS = {2, 4, 6, 10, 16};
+    private static final int[] PRESET_RADII = {8, 32, 64, 128, 256};
+    private static final int[] PRESET_MAX_OUTLINES = {32, 100, 200, 512, 1052};
+    private static final int[] PRESET_RAMP_SECONDS = {12, 6, 3, 2, 1};
 
     private final Screen parent;
     private List<Component> hoveredTooltip = null;
@@ -143,7 +143,7 @@ public class GatherOutlinesSettingsScreen extends Screen {
         int cy = height / 2 + 12;
         if (inside(mx, my, cx - 100, cy - 82, 200, 20)) {
             setTooltip(mx, my,
-                    Component.literal("Cycles Performance, Balanced, Fancy, and Extreme."),
+                    Component.literal("Cycles Performance, Balanced, Quality, Fancy, and Extreme."),
                     Component.literal("Changes range, max outlines, load speed, and scan budget."));
             return;
         }
@@ -222,6 +222,7 @@ public class GatherOutlinesSettingsScreen extends Screen {
         return switch (label) {
             case "Performance" -> 0x55FF77;
             case "Balanced" -> 0x66CCFF;
+            case "Quality" -> 0x44FFCC;
             case "Fancy" -> 0xFFD966;
             case "Extreme" -> 0xFF6666;
             default -> 0xB8C6D8;
