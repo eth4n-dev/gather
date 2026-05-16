@@ -53,7 +53,7 @@ public class WorldHighlightRenderer {
     private static final long VERTICAL_EXPAND_STABLE_MS = 3500;
     private static final long SECTION_CACHE_TTL_MS = 30_000;
     private static final long SECTION_CACHE_PRUNE_INTERVAL_MS = 5_000;
-    private static final int INITIAL_VERTICAL_SCAN_RADIUS = 10;
+    private static final int MIN_INITIAL_VERTICAL_SCAN_RADIUS = 10;
     private static final int VERTICAL_PRIORITY_WEIGHT = 3;
     private static final int INITIAL_VISIBLE_OUTLINES = 24;
     private static final int CHEST_XRAY_MAX_DISTANCE = 100;
@@ -955,7 +955,7 @@ public class WorldHighlightRenderer {
             lastPlayerPos = playerPos;
             currentChunkEnteredAtMs = now;
             lastVerticalExpandChunk = null;
-            startScanJob(playerPos, cachedNeededBlocks, INITIAL_VERTICAL_SCAN_RADIUS, cachedHighlights != null);
+            startScanJob(playerPos, cachedNeededBlocks, initialVerticalScanRadius(), cachedHighlights != null);
             return;
         }
 
@@ -977,9 +977,27 @@ public class WorldHighlightRenderer {
             lastPlayerPos = playerPos;
             int verticalRadius = chunk.equals(lastVerticalExpandChunk)
                     ? GatherSettings.get().highlightRadius
-                    : INITIAL_VERTICAL_SCAN_RADIUS;
+                    : initialVerticalScanRadius();
             startScanJob(playerPos, cachedNeededBlocks, verticalRadius, cachedHighlights != null);
         }
+    }
+
+    private static int initialVerticalScanRadius() {
+        GatherSettings settings = GatherSettings.get();
+        int radius = Math.max(0, settings.highlightRadius);
+        if (radius <= MIN_INITIAL_VERTICAL_SCAN_RADIUS) return radius;
+        if (settings.highlightScanBudget >= 16 || radius >= 256) return radius;
+        if (settings.highlightScanBudget >= 10 || radius >= 128) return Math.min(radius, 96);
+        if (settings.highlightScanBudget >= 6 || radius >= 64) return Math.min(radius, 48);
+        if (settings.highlightScanBudget >= 4 || radius >= 32) return Math.min(radius, 24);
+        return Math.min(radius, MIN_INITIAL_VERTICAL_SCAN_RADIUS);
+    }
+
+    private static int verticalPriorityWeight() {
+        GatherSettings settings = GatherSettings.get();
+        return settings.highlightScanBudget >= 16 || settings.highlightRadius >= 256
+                ? 1
+                : VERTICAL_PRIORITY_WEIGHT;
     }
 
     private static Deque<SectionKey> buildSectionQueue(BlockPos origin, int radius, int verticalRadius) {
@@ -1008,7 +1026,7 @@ public class WorldHighlightRenderer {
         int dx = cx - origin.getX();
         int dy = cy - origin.getY();
         int dz = cz - origin.getZ();
-        return dx * dx + dz * dz + dy * dy * VERTICAL_PRIORITY_WEIGHT;
+        return dx * dx + dz * dz + dy * dy * verticalPriorityWeight();
     }
 
     private static void processScanJob(ClientWorld world, Set<Block> neededBlocks) {
@@ -1164,7 +1182,7 @@ public class WorldHighlightRenderer {
         int dx = Math.abs(pos.getX() - ox);
         int dy = Math.abs(pos.getY() - oy);
         int dz = Math.abs(pos.getZ() - oz);
-        return dx + dz + dy * VERTICAL_PRIORITY_WEIGHT;
+        return dx + dz + dy * verticalPriorityWeight();
     }
 
     public static float[] rainbowColor(long time) {
