@@ -1207,9 +1207,16 @@ public class WorldHighlightRenderer {
     private static boolean isHiddenUnderground(ClientWorld world, BlockPos pos) {
         for (Direction dir : Direction.values()) {
             BlockPos neighbor = pos.offset(dir);
-            if (!world.getBlockState(neighbor).isOpaqueFullCube()) return false;
+            BlockState state = world.getBlockState(neighbor);
+            if (state.isAir() || !state.getFluidState().isEmpty()) return false;
+            if (isSnowExposureBlock(state)) continue;
+            if (!state.isOpaqueFullCube()) return false;
         }
         return true;
+    }
+
+    private static boolean isSnowExposureBlock(BlockState state) {
+        return "minecraft:snow".equals(Registries.BLOCK.getId(state.getBlock()).toString());
     }
 
     private static int currentVisibleHighlightLimit() {
