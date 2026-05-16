@@ -1,36 +1,26 @@
 # Gather
 
-Gather is a Fabric mod for Minecraft Java Edition that helps players plan and collect materials for large builds and farms.
+Gather is maintained on Minecraft-version branches.
 
-## Features
+The `main` branch is intentionally only an index. It does not contain mod source code, because no single Minecraft version is the canonical development target.
 
-- Goal lists for blocks and items you want to gather.
-- Favourite items feature and Recent tab
-- Automatic material breakdown for craftable goals.
-- HUD tracking for goals, base materials, and craft-ready items.
-- Chest scanning and finder tools for stored materials.
-- World highlights and xray-style helpers for needed blocks and scanned containers.
-- Crafting table overlay for craftable Gather goals.
-- Shulker collector tools for moving needed materials into a configured shulker.
-- Per-world saved lists, scans, hidden materials, and layout settings.
+## Active Branches
 
-## Requirements
+### Minecraft 1.21.11
 
-- Minecraft Java Edition 1.21.11 or 26.1
-- Fabric Loader 0.19.2 or newer
-- Fabric API
+Use [`1.21.11`](../../tree/1.21.11) for the Minecraft 1.21.11 build line.
 
-Optional:
+### Minecraft 26.1.x
 
-- Mod Menu
-- Where Is It (required for Xray feature)
+Use [`26.1.x`](../../tree/26.1.x) for the Minecraft 26.1.x build line.
 
-## Installation
+## Downloads
 
-1. Install Fabric Loader for Minecraft 1.21.11/26.1.
-2. Install Fabric API.
-3. Put `gather-version.jar` in your `mods` folder.
-4. Start Minecraft with the Fabric profile.
+Download the build that matches your Minecraft version from Modrinth or GitHub Releases.
+
+## Development
+
+Open the branch matching the Minecraft version you want to work on. Version-specific source, Gradle files, assets, and changelogs live on those branches.
 
 ## License
 
