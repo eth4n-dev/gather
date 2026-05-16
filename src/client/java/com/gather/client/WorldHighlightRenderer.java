@@ -19,6 +19,7 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.ShapeRenderer;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -30,6 +31,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.phys.HitResult;
 import com.mojang.math.Axis;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
@@ -1063,7 +1065,7 @@ public class WorldHighlightRenderer {
                     scanJob.radius(), scanJob.verticalRadius(), scanJob.highlightSet());
         }
         pruneCachedHighlights(world, neededBlocks, exposedOnly);
-        applyHighlightLimit(world, scanJob.highlights(), scanJob.highlightSet(), scanJob.origin());
+        applyHighlightLimit(world, scanJob.highlights(), scanJob.highlightSet(), scanJob.origin(), exposedOnly);
         cachedHighlights = scanJob.highlights();
         if (scanJob.pending().isEmpty()) scanJob = null;
     }
@@ -1136,53 +1138,25 @@ public class WorldHighlightRenderer {
         }
     }
 
-    private static void applyHighlightLimit(ClientLevel world, List<BlockPos> result, Set<Long> existing, BlockPos origin) {
+    private static void applyHighlightLimit(ClientLevel world, List<BlockPos> result, Set<Long> existing,
+                                            BlockPos origin, boolean exposedOnly) {
         int limit = GatherSettings.get().maxBlockHighlights;
-        if (limit > 0 && result.size() > limit) {
-            int ox = origin.getX(), oy = origin.getY(), oz = origin.getZ();
-            result.sort((a, b) -> Integer.compare(
-                    highlightDistanceScore(a, ox, oy, oz),
-                    highlightDistanceScore(b, ox, oy, oz)));
-            List<BlockPos> limited = balancedHighlightLimit(world, result, limit);
-            existing.clear();
-            for (BlockPos pos : limited) existing.add(pos.asLong());
-            result.clear();
-            result.addAll(limited);
-        }
-    }
-
-    private static List<BlockPos> balancedHighlightLimit(ClientLevel world, List<BlockPos> sorted, int limit) {
-        if (sorted.size() <= limit) return sorted;
-        Map<Block, Integer> totalsByBlock = new HashMap<>();
-        for (BlockPos pos : sorted) {
-            Block block = world.getBlockState(pos).getBlock();
-            totalsByBlock.put(block, totalsByBlock.getOrDefault(block, 0) + 1);
-        }
-        if (totalsByBlock.size() <= 1) return new ArrayList<>(sorted.subList(0, limit));
-
-        int blockTypes = totalsByBlock.size();
-        int softCapPerBlock = Math.max(1, (int) Math.ceil(limit / (double) blockTypes));
-        Map<Block, Integer> usedByBlock = new HashMap<>();
-        List<BlockPos> firstPass = new ArrayList<>(limit);
-        List<BlockPos> overflow = new ArrayList<>();
-
-        for (BlockPos pos : sorted) {
-            Block block = world.getBlockState(pos).getBlock();
-            int used = usedByBlock.getOrDefault(block, 0);
-            if (used < softCapPerBlock || totalsByBlock.getOrDefault(block, 0) <= softCapPerBlock) {
-                firstPass.add(pos);
-                usedByBlock.put(block, used + 1);
-                if (firstPass.size() >= limit) return firstPass;
-            } else {
-                overflow.add(pos);
+        if (limit <= 0) return;
+        int ox = origin.getX(), oy = origin.getY(), oz = origin.getZ();
+        result.sort((a, b) -> Integer.compare(
+                highlightDistanceScore(a, ox, oy, oz),
+                highlightDistanceScore(b, ox, oy, oz)));
+        List<BlockPos> limited = new ArrayList<>(Math.min(limit, result.size()));
+        for (BlockPos pos : result) {
+            if (!exposedOnly || isVisibleForNormalOutline(world, pos)) {
+                limited.add(pos);
+                if (limited.size() >= limit) break;
             }
         }
-
-        for (BlockPos pos : overflow) {
-            if (firstPass.size() >= limit) break;
-            firstPass.add(pos);
-        }
-        return firstPass;
+        existing.clear();
+        for (BlockPos pos : limited) existing.add(pos.asLong());
+        result.clear();
+        result.addAll(limited);
     }
 
     private static List<BlockPos> visibleHighlights() {
@@ -1198,7 +1172,7 @@ public class WorldHighlightRenderer {
         int limit = currentVisibleHighlightLimit();
         List<BlockPos> exposed = new ArrayList<>();
         for (BlockPos pos : cachedHighlights) {
-            if (!isHiddenUnderground(world, pos)) {
+            if (isVisibleForNormalOutline(world, pos)) {
                 exposed.add(pos);
                 if (exposed.size() >= limit) break;
             }
@@ -1208,16 +1182,30 @@ public class WorldHighlightRenderer {
 
     private static boolean isHiddenUnderground(ClientLevel world, BlockPos pos) {
         for (Direction dir : Direction.values()) {
-            BlockState neighbor = world.getBlockState(pos.relative(dir));
-            if (neighbor.isAir() || !neighbor.getFluidState().isEmpty()) return false;
-            if (isSnowExposureBlock(neighbor)) continue;
-            if (!neighbor.canOcclude()) return false;
+            if (!world.getBlockState(pos.relative(dir)).canOcclude()) return false;
         }
         return true;
     }
 
-    private static boolean isSnowExposureBlock(BlockState state) {
-        return "minecraft:snow".equals(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+    private static boolean isVisibleForNormalOutline(ClientLevel world, BlockPos pos) {
+        if (isHiddenUnderground(world, pos)) return false;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null) return true;
+        Vec3 from = minecraft.getEntityRenderDispatcher().camera.position();
+        return canSeeBlockPoint(world, from, pos, 0.5, 0.5, 0.5)
+                || canSeeBlockPoint(world, from, pos, 0.5, 0.08, 0.5)
+                || canSeeBlockPoint(world, from, pos, 0.5, 0.92, 0.5)
+                || canSeeBlockPoint(world, from, pos, 0.08, 0.5, 0.5)
+                || canSeeBlockPoint(world, from, pos, 0.92, 0.5, 0.5)
+                || canSeeBlockPoint(world, from, pos, 0.5, 0.5, 0.08)
+                || canSeeBlockPoint(world, from, pos, 0.5, 0.5, 0.92);
+    }
+
+    private static boolean canSeeBlockPoint(ClientLevel world, Vec3 from, BlockPos pos, double x, double y, double z) {
+        Vec3 to = new Vec3(pos.getX() + x, pos.getY() + y, pos.getZ() + z);
+        HitResult hit = world.clip(new ClipContext(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, Minecraft.getInstance().player));
+        return hit.getType() == HitResult.Type.MISS
+                || (hit instanceof net.minecraft.world.phys.BlockHitResult blockHit && blockHit.getBlockPos().equals(pos));
     }
 
     private static int currentVisibleHighlightLimit() {
