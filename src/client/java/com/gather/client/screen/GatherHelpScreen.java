@@ -1,5 +1,6 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherSettings;
 import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
@@ -123,15 +124,15 @@ public class GatherHelpScreen extends Screen {
         int px = cx - panelW / 2;
         int py = panelY();
 
-        ctx.fill(0, 0, width, height, 0x88000000);
-        ctx.fill(px, py, px + panelW, py + panelH, 0xEE0D1124);
-        ctx.fill(px, py, px + panelW, py + 1, 0xFF2255AA);
-        ctx.fill(px, py + panelH - 1, px + panelW, py + panelH, 0xFF2255AA);
-        ctx.fill(px, py, px + 1, py + panelH, 0xFF2255AA);
-        ctx.fill(px + panelW - 1, py, px + panelW, py + panelH, 0xFF2255AA);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0x88000000);
+        GatherTheme.fill(ctx, px, py, px + panelW, py + panelH, 0xEE0D1124);
+        GatherTheme.fill(ctx, px, py, px + panelW, py + 1, 0xFF2255AA);
+        GatherTheme.fill(ctx, px, py + panelH - 1, px + panelW, py + panelH, 0xFF2255AA);
+        GatherTheme.fill(ctx, px, py, px + 1, py + panelH, 0xFF2255AA);
+        GatherTheme.fill(ctx, px + panelW - 1, py, px + panelW, py + panelH, 0xFF2255AA);
 
         ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("Gather Help"), cx, py + 8, 0xFF88BBFF);
-        ctx.fill(px + 10, py + 19, px + panelW - 10, py + 20, 0x44336699);
+        GatherTheme.fill(ctx, px + 10, py + 19, px + panelW - 10, py + 20, 0x44336699);
 
         int contentTop = py + 27;
         int contentBot = py + panelH - 34;
@@ -164,22 +165,22 @@ public class GatherHelpScreen extends Screen {
         if (maxScroll > 0) {
             int barH = Math.max(16, contentH * contentH / totalH);
             int barY = contentTop + (scroll * (contentH - barH) / maxScroll);
-            ctx.fill(px + panelW - 8, contentTop, px + panelW - 5, contentBot, 0x22FFFFFF);
-            ctx.fill(px + panelW - 8, barY, px + panelW - 5, barY + barH, 0x88AACCFF);
+            GatherTheme.fill(ctx, px + panelW - 8, contentTop, px + panelW - 5, contentBot, 0x22FFFFFF);
+            GatherTheme.fill(ctx, px + panelW - 8, barY, px + panelW - 5, barY + barH, 0x88AACCFF);
         }
 
         super.render(ctx, mx, my, delta);
     }
 
     private void drawSection(DrawContext ctx, int px, int panelW, int y, String label) {
-        ctx.fill(px + 8, y + 10, px + panelW - 14, y + 11, 0x22336699);
+        GatherTheme.fill(ctx, px + 8, y + 10, px + panelW - 14, y + 11, 0x22336699);
         ctx.drawTextWithShadow(textRenderer, Text.literal(label), px + 14, y + 5, 0xFFFFFF66);
     }
 
     private void drawTip(DrawContext ctx, int px, int panelW, int descX, int descW, int y, int h, int rowIndex, HelpEntry entry) {
-        if (rowIndex % 2 == 0) ctx.fill(px + 6, y, px + panelW - 10, y + h - 2, 0x11AACCFF);
+        if (rowIndex % 2 == 0) GatherTheme.fill(ctx, px + 6, y, px + panelW - 10, y + h - 2, 0x11AACCFF);
         ctx.drawTextWithShadow(textRenderer, Text.literal(entry.label()), px + 14, y + ROW_PAD + 1, 0xFF55CCFF);
-        ctx.fill(px + 14 + LABEL_W, y + 4, px + 15 + LABEL_W, y + h - 5, 0x33336699);
+        GatherTheme.fill(ctx, px + 14 + LABEL_W, y + 4, px + 15 + LABEL_W, y + h - 5, 0x33336699);
 
         List<OrderedText> lines = textRenderer.wrapLines(Text.literal(entry.body()), descW);
         int ty = y + ROW_PAD + 1;

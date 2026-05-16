@@ -152,13 +152,9 @@ public class GatherShulkerCollectorOverlay {
         int[] b = buttonBounds(screen, index);
         boolean hovered = inside(mx, my, b[0], b[1], BUTTON_W, BUTTON_H);
         boolean active = serverStateLoaded && (index == 0 ? collectorActive : index == 1 ? !allMode : leaveOne);
-        int bg = active ? (hovered ? 0xDD005544 : 0xBB004433) : (hovered ? 0xDD223355 : 0xBB111A28);
-        int edge = active ? 0xFF33DDAA : 0xFF445566;
-        ctx.fill(b[0], b[1], b[0] + BUTTON_W, b[1] + BUTTON_H, bg);
-        ctx.fill(b[0], b[1], b[0] + BUTTON_W, b[1] + 1, edge);
-        ctx.fill(b[0], b[1] + BUTTON_H - 1, b[0] + BUTTON_W, b[1] + BUTTON_H, 0x66111122);
-        ctx.drawTextWithShadow(MinecraftClient.getInstance().textRenderer,
-                Text.literal(label), b[0] + 5, b[1] + 3, textColor);
+        GatherTheme.drawNineSlice(ctx, shulkerButtonTexture(index, active, hovered),
+                b[0], b[1], BUTTON_W, BUTTON_H);
+        drawThemeText(ctx, Text.literal(label), b[0] + 5, b[1] + 3, textColor);
 
         if (hovered) {
             ctx.setCursor(StandardCursors.POINTING_HAND);
@@ -179,10 +175,8 @@ public class GatherShulkerCollectorOverlay {
     private static void renderArrowButton(HandledScreen<?> screen, DrawContext ctx, int mx, int my) {
         int[] b = arrowButtonBounds(screen);
         boolean hovered = inside(mx, my, b[0], b[1], 16, BUTTON_H);
-        int bg = certainOpen ? (hovered ? 0xDD005544 : 0xBB004433) : (hovered ? 0xDD223355 : 0xBB111A28);
-        int edge = certainOpen ? 0xFF33DDAA : 0xFF445566;
-        ctx.fill(b[0], b[1], b[0] + 16, b[1] + BUTTON_H, bg);
-        ctx.fill(b[0], b[1], b[0] + 16, b[1] + 1, edge);
+        GatherTheme.drawNineSlice(ctx, shulkerButtonTexture(1, certainOpen, hovered),
+                b[0], b[1], 16, BUTTON_H);
         drawSearchIcon(ctx, b[0] + 2, b[1] + 2);
         if (hovered) {
             ctx.setCursor(StandardCursors.POINTING_HAND);
@@ -194,30 +188,19 @@ public class GatherShulkerCollectorOverlay {
     private static void renderPanel(HandledScreen<?> screen, DrawContext ctx, int mx, int my) {
         MinecraftClient client = MinecraftClient.getInstance();
         int[] p = panelBounds(screen);
-        ctx.fill(p[0], p[1], p[0] + PANEL_W, p[1] + PANEL_H, 0xEA101722);
-        ctx.fill(p[0], p[1], p[0] + PANEL_W, p[1] + 1, 0xFF5C6C80);
-        ctx.fill(p[0], p[1] + 20, p[0] + PANEL_W, p[1] + 21, 0x665C6C80);
+        GatherTheme.drawNineSlice(ctx, GatherTheme.MENU_PANEL, p[0], p[1], PANEL_W, PANEL_H);
 
         String selected = selectedItems.isEmpty() ? "None selected" : selectedItems.size() + " selected";
-        ctx.drawTextWithShadow(client.textRenderer, Text.literal(selected), p[0] + 6, p[1] + 6, 0xFFE6EFF7);
+        drawThemeText(ctx, Text.literal(selected), p[0] + 6, p[1] + 6, GatherTheme.textPrimary());
 
         // Filter toggle: Goals / All
         int toggleX = p[0] + PANEL_W - 54;
         int toggleY = p[1] + 3;
         boolean toggleHov = inside(mx, my, toggleX, toggleY, 48, 14);
-        int toggleBg = filterGoalsOnly
-                ? (toggleHov ? 0xDD223355 : 0xBB111A28)
-                : (toggleHov ? 0xDD005544 : 0xBB004433);
-        int toggleEdge = filterGoalsOnly ? 0xFF445566 : 0xFF33DDAA;
-        ctx.fill(toggleX + 1, toggleY + 1, toggleX + 49, toggleY + 15, 0x66101822);
-        ctx.fill(toggleX, toggleY, toggleX + 48, toggleY + 14, toggleBg);
-        ctx.fill(toggleX, toggleY, toggleX + 48, toggleY + 1, toggleEdge);
-        ctx.fill(toggleX, toggleY + 13, toggleX + 48, toggleY + 14, filterGoalsOnly ? 0xFF1A2233 : 0xFF006A55);
-        ctx.fill(toggleX, toggleY, toggleX + 1, toggleY + 14, filterGoalsOnly ? 0xAA334455 : 0xAA33DDAA);
-        ctx.fill(toggleX + 47, toggleY, toggleX + 48, toggleY + 14, filterGoalsOnly ? 0xAA1A2233 : 0xAA006A55);
-        ctx.drawTextWithShadow(client.textRenderer,
-                Text.literal(filterGoalsOnly ? "Goals" : "All"),
-                toggleX + 5, toggleY + 3, filterGoalsOnly ? 0xFFAAB7C4 : 0xFF66FFD6);
+        GatherTheme.drawNineSlice(ctx, shulkerButtonTexture(1, !filterGoalsOnly, toggleHov),
+                toggleX, toggleY, 48, 14);
+        drawThemeText(ctx, Text.literal(filterGoalsOnly ? "Goals" : "All"), toggleX + 5, toggleY + 3,
+                filterGoalsOnly ? GatherTheme.textButton() : 0xFF66FFD6);
         if (toggleHov) {
             ctx.setCursor(StandardCursors.POINTING_HAND);
             hoveredLines = List.of(Text.literal(filterGoalsOnly ? "Showing goal items only" : "Showing all items"));
@@ -236,13 +219,16 @@ public class GatherShulkerCollectorOverlay {
             boolean hovered = inside(mx, my, p[0] + 4, y - 1, PANEL_W - 8, ROW_H);
             boolean selectedRow = selectedItems.contains(id);
             int rowColor = selectedRow ? 0x6633AA88 : (hovered ? 0x442E4054 : 0x00000000);
-            if (rowColor != 0) ctx.fill(p[0] + 4, y - 1, p[0] + PANEL_W - 4, y + ROW_H - 1, rowColor);
+            if (rowColor != 0) GatherTheme.drawNineSlice(ctx,
+                    selectedRow ? GatherTheme.MENU_ROW_COMPLETE : GatherTheme.MENU_ROW_HOVER,
+                    p[0] + 4, y - 1, PANEL_W - 8, ROW_H);
             String label = itemLabel(id);
             if (client.textRenderer.getWidth(label) > PANEL_W - 28) {
                 label = client.textRenderer.trimToWidth(label, PANEL_W - 36) + "...";
             }
-            ctx.drawText(client.textRenderer, Text.literal((selectedRow ? "* " : "  ") + label),
-                    p[0] + 7, y, selectedRow ? 0xFF66FFD6 : 0xFFE6EFF7, false);
+            drawThemeText(ctx, Text.literal((selectedRow ? "* " : "  ") + label),
+                    p[0] + 7, y,
+                    selectedRow ? 0xFF66FFD6 : GatherTheme.textPrimary());
             if (hovered) {
                 ctx.setCursor(StandardCursors.POINTING_HAND);
                 hoveredLines = List.of(
@@ -256,7 +242,7 @@ public class GatherShulkerCollectorOverlay {
 
         if (rows.isEmpty()) {
             String emptyMsg = filterGoalsOnly ? "No goal items" : "No items found";
-            ctx.drawText(client.textRenderer, Text.literal(emptyMsg), p[0] + 7, startY, 0xFF8996A4, false);
+            drawThemeText(ctx, Text.literal(emptyMsg), p[0] + 7, startY, GatherTheme.textMuted());
         }
     }
 
@@ -390,6 +376,22 @@ public class GatherShulkerCollectorOverlay {
         cacheOpenPlacedShulkerState();
         GatherClientNetworking.updateCollectorTargets(currentNeededItems());
         GatherClientNetworking.configureCollector(collectorActive, allMode, new ArrayList<>(selectedItems), leaveOne);
+    }
+
+    private static GatherTheme.NineSlice shulkerButtonTexture(int index, boolean active, boolean hovered) {
+        if (active && index == 1) {
+            return hovered ? GatherTheme.SHULKER_BUTTON_ORANGE_HOVER : GatherTheme.SHULKER_BUTTON_ORANGE;
+        }
+        if (active) {
+            return hovered ? GatherTheme.SHULKER_BUTTON_ACTIVE_HOVER : GatherTheme.SHULKER_BUTTON_ACTIVE;
+        }
+        return hovered ? GatherTheme.SHULKER_BUTTON_HOVER : GatherTheme.SHULKER_BUTTON;
+    }
+
+    private static void drawThemeText(DrawContext ctx, Text text, int x, int y, int color) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null) return;
+        ctx.drawText(client.textRenderer, text, x, y, color, true);
     }
 
     private static void playClick() {

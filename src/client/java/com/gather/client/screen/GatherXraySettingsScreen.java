@@ -1,7 +1,9 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherSettings;
 import com.gather.client.GatherState;
+import com.gather.client.WorldHighlightRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -38,6 +40,7 @@ public class GatherXraySettingsScreen extends Screen {
         ButtonWidget blockXray = ButtonWidget
                 .builder(stateText("Block Xray", GatherSettings.get().blockXray), btn -> {
                     GatherSettings.get().blockXray = !GatherSettings.get().blockXray;
+                    WorldHighlightRenderer.invalidateCache();
                     GatherSettings.get().save();
                     btn.setMessage(stateText("Block Xray", GatherSettings.get().blockXray));
                 })
@@ -66,7 +69,7 @@ public class GatherXraySettingsScreen extends Screen {
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
         hoveredTooltip = null;
-        ctx.fill(0, 0, width, height, 0xCC111122);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
         ctx.drawCenteredTextWithShadow(textRenderer, title, width / 2, height / 2 - 55, 0xFFCCDDFF);
         super.render(ctx, mx, my, delta);
 

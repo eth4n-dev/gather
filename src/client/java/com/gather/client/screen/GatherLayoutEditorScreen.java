@@ -1,5 +1,6 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherSettings;
 import com.gather.client.GatherUi;
 import net.minecraft.client.gui.Click;
@@ -53,7 +54,7 @@ public class GatherLayoutEditorScreen extends Screen {
 
     @Override
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        ctx.fill(0, 0, width, height, 0xCC050812);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC050812);
         ctx.drawCenteredTextWithShadow(textRenderer, title, width / 2, 8, 0xFFCCDDFF);
         ctx.drawCenteredTextWithShadow(textRenderer,
                 Text.literal("Drag modules. Resize with the lower-right handle."), width / 2, 20, 0xFF778899);
@@ -61,23 +62,23 @@ public class GatherLayoutEditorScreen extends Screen {
         // center guide lines — brighten while dragging
         int lineAlpha = (active != null && !resizing) ? 0x55 : 0x22;
         int lineColor = (lineAlpha << 24) | 0x44AAFF;
-        ctx.fill(width / 2, 32, width / 2 + 1, height - 28, lineColor);
-        ctx.fill(4, height / 2, width - 4, height / 2 + 1, lineColor);
+        GatherTheme.fill(ctx, width / 2, 32, width / 2 + 1, height - 28, lineColor);
+        GatherTheme.fill(ctx, 4, height / 2, width - 4, height / 2 + 1, lineColor);
 
         // per-box extended border guide lines
         if (showExtendedBorders) {
             for (Box box : boxes) {
                 int c = (box.color & 0x00FFFFFF) | 0x22000000;
-                ctx.fill(box.x,           32,        box.x + 1,           height - 28, c);
-                ctx.fill(box.x + box.w,   32,        box.x + box.w + 1,   height - 28, c);
-                ctx.fill(4, box.y,         width - 4, box.y + 1,                        c);
-                ctx.fill(4, box.y + box.h, width - 4, box.y + box.h + 1,               c);
+                GatherTheme.fill(ctx, box.x,           32,        box.x + 1,           height - 28, c);
+                GatherTheme.fill(ctx, box.x + box.w,   32,        box.x + box.w + 1,   height - 28, c);
+                GatherTheme.fill(ctx, 4, box.y,         width - 4, box.y + 1,                        c);
+                GatherTheme.fill(ctx, 4, box.y + box.h, width - 4, box.y + box.h + 1,               c);
             }
         }
 
         // active snap highlight lines
-        for (int lx : snapXLines) ctx.fill(lx, 32, lx + 1, height - 28, 0xAAFFDD33);
-        for (int ly : snapYLines) ctx.fill(4, ly, width - 4, ly + 1, 0xAAFFDD33);
+        for (int lx : snapXLines) GatherTheme.fill(ctx, lx, 32, lx + 1, height - 28, 0xAAFFDD33);
+        for (int ly : snapYLines) GatherTheme.fill(ctx, 4, ly, width - 4, ly + 1, 0xAAFFDD33);
 
         for (int i = 0; i < boxes.size(); i++) drawBox(ctx, boxes.get(i), mouseX, mouseY, i);
 
@@ -94,13 +95,13 @@ public class GatherLayoutEditorScreen extends Screen {
     private void drawBox(DrawContext ctx, Box box, int mx, int my, int idx) {
         boolean hover = contains(box, mx, my);
         int fill = hover || box == active ? 0x66335577 : 0x44223344;
-        ctx.fill(box.x, box.y, box.x + box.w, box.y + box.h, fill);
-        ctx.fill(box.x, box.y,             box.x + box.w, box.y + 1,        box.color);
-        ctx.fill(box.x, box.y + box.h - 1, box.x + box.w, box.y + box.h,   box.color);
-        ctx.fill(box.x, box.y,             box.x + 1,     box.y + box.h,   box.color);
-        ctx.fill(box.x + box.w - 1, box.y, box.x + box.w, box.y + box.h,   box.color);
+        GatherTheme.fill(ctx, box.x, box.y, box.x + box.w, box.y + box.h, fill);
+        GatherTheme.fill(ctx, box.x, box.y,             box.x + box.w, box.y + 1,        box.color);
+        GatherTheme.fill(ctx, box.x, box.y + box.h - 1, box.x + box.w, box.y + box.h,   box.color);
+        GatherTheme.fill(ctx, box.x, box.y,             box.x + 1,     box.y + box.h,   box.color);
+        GatherTheme.fill(ctx, box.x + box.w - 1, box.y, box.x + box.w, box.y + box.h,   box.color);
         if (box.resizable)
-            ctx.fill(box.x + box.w - HANDLE, box.y + box.h - HANDLE,
+            GatherTheme.fill(ctx, box.x + box.w - HANDLE, box.y + box.h - HANDLE,
                      box.x + box.w - 2,      box.y + box.h - 2, box.color);
 
         ctx.enableScissor(box.x + 1, box.y + 1, box.x + box.w - 1, box.y + box.h - 1);
@@ -116,31 +117,31 @@ public class GatherLayoutEditorScreen extends Screen {
                 ctx.drawTextWithShadow(tr, Text.literal("§7My Goals"), bx + 2, by + 2, 0xFF778899);
                 int ry = by + 13;
                 // row: Diamond Sword, 1/2, 50% progress
-                ctx.fill(bx, ry, bx + Math.min(80, bw), ry + 20, 0xAA00001A);
+                GatherTheme.fill(ctx, bx, ry, bx + Math.min(80, bw), ry + 20, 0xAA00001A);
                 ctx.drawItem(Items.DIAMOND_SWORD.getDefaultStack(), bx + 1, ry + 2);
                 ctx.drawTextWithShadow(tr, Text.literal("Sword"), bx + 19, ry + 2, 0xFFCCCCCC);
                 ctx.drawTextWithShadow(tr, Text.literal("1/2"), bx + Math.min(57, bw - 20), ry + 2, 0xFFFFFF55);
-                ctx.fill(bx, ry + 18, bx + Math.min(80, bw), ry + 19, 0x33000000);
-                ctx.fill(bx, ry + 18, bx + Math.min(40, bw / 2), ry + 19, 0xFFFFDD33);
+                GatherTheme.fill(ctx, bx, ry + 18, bx + Math.min(80, bw), ry + 19, 0x33000000);
+                GatherTheme.fill(ctx, bx, ry + 18, bx + Math.min(40, bw / 2), ry + 19, 0xFFFFDD33);
                 ry += 20;
                 if (ry + 20 <= by + bh - 2) {
                     // row: Arrow, 16/16, full
-                    ctx.fill(bx, ry, bx + Math.min(80, bw), ry + 20, 0xAA002200);
+                    GatherTheme.fill(ctx, bx, ry, bx + Math.min(80, bw), ry + 20, 0xAA002200);
                     ctx.drawItem(Items.ARROW.getDefaultStack(), bx + 1, ry + 2);
                     ctx.drawTextWithShadow(tr, Text.literal("Arrow"), bx + 19, ry + 2, 0xFFEEFFEE);
                     ctx.drawTextWithShadow(tr, Text.literal("16/16"), bx + Math.min(53, bw - 24), ry + 2, 0xFF88FF88);
-                    ctx.fill(bx, ry + 18, bx + Math.min(80, bw), ry + 19, 0x33000000);
-                    ctx.fill(bx, ry + 18, bx + Math.min(80, bw), ry + 19, 0xFF44DD66);
+                    GatherTheme.fill(ctx, bx, ry + 18, bx + Math.min(80, bw), ry + 19, 0x33000000);
+                    GatherTheme.fill(ctx, bx, ry + 18, bx + Math.min(80, bw), ry + 19, 0xFF44DD66);
                     ry += 20;
                 }
                 if (ry + 20 <= by + bh - 2) {
                     // row: Iron Ingot, 3/8
-                    ctx.fill(bx, ry, bx + Math.min(80, bw), ry + 20, 0xAA00001A);
+                    GatherTheme.fill(ctx, bx, ry, bx + Math.min(80, bw), ry + 20, 0xAA00001A);
                     ctx.drawItem(Items.IRON_INGOT.getDefaultStack(), bx + 1, ry + 2);
                     ctx.drawTextWithShadow(tr, Text.literal("Iron"), bx + 19, ry + 2, 0xFFCCCCCC);
                     ctx.drawTextWithShadow(tr, Text.literal("3/8"), bx + Math.min(57, bw - 20), ry + 2, 0xFFFF6666);
-                    ctx.fill(bx, ry + 18, bx + Math.min(80, bw), ry + 19, 0x33000000);
-                    ctx.fill(bx, ry + 18, bx + Math.min(30, bw * 3 / 8), ry + 19, 0xFFFF8833);
+                    GatherTheme.fill(ctx, bx, ry + 18, bx + Math.min(80, bw), ry + 19, 0x33000000);
+                    GatherTheme.fill(ctx, bx, ry + 18, bx + Math.min(30, bw * 3 / 8), ry + 19, 0xFFFF8833);
                 }
             }
             case 1 -> { // Base Materials
@@ -151,12 +152,12 @@ public class GatherLayoutEditorScreen extends Screen {
                 for (int i = 0; i < 3 && ry + 16 <= by + bh - 2; i++) {
                     int have = matData[i][0], need = matData[i][1], col = matData[i][2];
                     int bgBase = have >= need ? 0x00AA44 : 0x220033;
-                    ctx.fill(bx, ry, bx + Math.min(80, bw), ry + 16, (0x88 << 24) | bgBase);
+                    GatherTheme.fill(ctx, bx, ry, bx + Math.min(80, bw), ry + 16, (0x88 << 24) | bgBase);
                     ctx.drawItem(matItems[i].getDefaultStack(), bx + 1, ry);
                     ctx.drawTextWithShadow(tr, Text.literal(have + "/" + need), bx + 19, ry + 4, col);
                     int lw = (int)(Math.min(80, bw) * (float) have / need);
-                    ctx.fill(bx, ry + 15, bx + Math.min(80, bw), ry + 16, 0x33000000);
-                    if (lw > 0) ctx.fill(bx, ry + 15, bx + lw, ry + 16, have >= need ? 0xFF44DD66 : 0xFFFFDD33);
+                    GatherTheme.fill(ctx, bx, ry + 15, bx + Math.min(80, bw), ry + 16, 0x33000000);
+                    if (lw > 0) GatherTheme.fill(ctx, bx, ry + 15, bx + lw, ry + 16, have >= need ? 0xFF44DD66 : 0xFFFFDD33);
                     ry += 16;
                 }
             }
@@ -164,7 +165,7 @@ public class GatherLayoutEditorScreen extends Screen {
                 ctx.drawTextWithShadow(tr, Text.literal("§acraft ready"), bx + 2, by + 2, 0xFF66CC66);
                 int ry = by + 13;
                 if (ry + 18 <= by + bh - 2) {
-                    ctx.fill(bx, ry, bx + Math.min(80, bw), ry + 18, (0xAA << 24) | (0x22 << 8));
+                    GatherTheme.fill(ctx, bx, ry, bx + Math.min(80, bw), ry + 18, (0xAA << 24) | (0x22 << 8));
                     ctx.drawItem(Items.OAK_PLANKS.getDefaultStack(), bx + 1,  ry + 1);
                     ctx.drawItem(Items.OAK_PLANKS.getDefaultStack(), bx + 16, ry + 1);
                     ctx.drawTextWithShadow(tr, Text.literal("->"), bx + 33, ry + 5, 0xFF88CC88);
@@ -173,7 +174,7 @@ public class GatherLayoutEditorScreen extends Screen {
                     ry += 18;
                 }
                 if (ry + 18 <= by + bh - 2) {
-                    ctx.fill(bx, ry, bx + Math.min(80, bw), ry + 18, (0xAA << 24) | (0x22 << 8));
+                    GatherTheme.fill(ctx, bx, ry, bx + Math.min(80, bw), ry + 18, (0xAA << 24) | (0x22 << 8));
                     ctx.drawItem(Items.IRON_INGOT.getDefaultStack(), bx + 1, ry + 1);
                     ctx.drawTextWithShadow(tr, Text.literal("->"), bx + 33, ry + 5, 0xFF88CC88);
                     ctx.drawItem(Items.IRON_SWORD.getDefaultStack(), bx + 44, ry + 1);
@@ -181,7 +182,7 @@ public class GatherLayoutEditorScreen extends Screen {
                 }
             }
             case 3 -> { // Manual Scan Banner
-                ctx.fill(bx + 1, by + 1, bx + bw - 1, by + bh - 1, 0xCC001A1A);
+                GatherTheme.fill(ctx, bx + 1, by + 1, bx + bw - 1, by + bh - 1, 0xCC001A1A);
                 ctx.drawCenteredTextWithShadow(tr, Text.literal("◎ MANUAL SCAN ACTIVE"), bx + bw / 2, by + 4,  0xFFFFCC44);
                 if (bh > 22) ctx.drawCenteredTextWithShadow(tr, Text.literal("Right-click chests to tag"), bx + bw / 2, by + 15, 0xFFCCBB88);
                 if (bh > 32) ctx.drawCenteredTextWithShadow(tr, Text.literal("2 chests tagged"), bx + bw / 2, by + 26, 0xFFFFDD99);
@@ -190,11 +191,11 @@ public class GatherLayoutEditorScreen extends Screen {
                 String badge = "• SCAN ALL (8)";
                 int badgeW = tr.getWidth(badge) + 8;
                 int badgeX = bx + bw - 4 - badgeW;
-                ctx.fill(badgeX, by + 2, badgeX + badgeW, by + 13, 0xAA00332B);
+                GatherTheme.fill(ctx, badgeX, by + 2, badgeX + badgeW, by + 13, 0xAA00332B);
                 ctx.drawTextWithShadow(tr, Text.literal(badge), badgeX + 4, by + 4, 0xFF33D6AA);
             }
             case 5 -> { // Find Item Panel
-                ctx.fill(bx + 1, by + 1, bx + bw - 1, by + bh - 1, 0xCC1A0000);
+                GatherTheme.fill(ctx, bx + 1, by + 1, bx + bw - 1, by + bh - 1, 0xCC1A0000);
                 ctx.drawItem(Items.DIAMOND.getDefaultStack(), bx + 2, by + 3);
                 ctx.drawTextWithShadow(tr, Text.literal("Diamond"),         bx + 22, by + 4,  0xFFFF9999);
                 ctx.drawTextWithShadow(tr, Text.literal("x8  in 2 chests"), bx + 22, by + 15, 0xFFAA7744);
@@ -205,8 +206,8 @@ public class GatherLayoutEditorScreen extends Screen {
                 int    tw   = tr.getWidth(msg);
                 int    pw   = tw + 18;
                 int    px   = bx + (bw - pw) / 2;
-                ctx.fill(px, by, px + pw, by + 14, 0xFF001A00);
-                ctx.fill(px, by, px + pw, by + 1,  0xFF33CC66);
+                GatherTheme.fill(ctx, px, by, px + pw, by + 14, 0xFF001A00);
+                GatherTheme.fill(ctx, px, by, px + pw, by + 1,  0xFF33CC66);
                 ctx.drawTextWithShadow(tr, Text.literal(msg), px + 9, by + 3, 0xFFAAFFCC);
             }
         }
@@ -217,8 +218,8 @@ public class GatherLayoutEditorScreen extends Screen {
         boolean hov = mx >= x && mx <= x + w && my >= y && my <= y + h;
         int bg     = lit ? 0xFF1A3320 : (hov ? 0xFF445577 : 0xFF24344F);
         int border = lit ? 0xFF44AA55 : 0xFF667799;
-        ctx.fill(x, y, x + w, y + h, bg);
-        ctx.fill(x, y, x + w, y + 1, border);
+        GatherTheme.fill(ctx, x, y, x + w, y + h, bg);
+        GatherTheme.fill(ctx, x, y, x + w, y + 1, border);
         ctx.drawTextWithShadow(textRenderer, Text.literal(label),
                 x + (w - textRenderer.getWidth(label)) / 2, y + 5, 0xFFCCDDFF);
     }

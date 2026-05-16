@@ -1,5 +1,6 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherList;
 import com.gather.client.GatherState;
 import com.gather.client.GatherUi;
@@ -71,7 +72,7 @@ public class GatherTransferScreen extends Screen {
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
         clearExpiredStatus();
-        ctx.fill(0, 0, width, height, 0xCC111122);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
         ctx.drawCenteredTextWithShadow(textRenderer, title, width / 2, 10, 0xFFCCDDFF);
         String subtitle = switch (mode) {
             case MODE_EXPORT -> "Choose a current-world list to export as JSON";
@@ -98,8 +99,8 @@ public class GatherTransferScreen extends Screen {
         if (totalContentH > visH) {
             int thumbH = Math.max(14, visH * visH / totalContentH);
             int thumbY = CONTENT_TOP + (int)((long)(visH - thumbH) * scrollY / (totalContentH - visH));
-            ctx.fill(menuR - 3, CONTENT_TOP, menuR - 1, contentBottom, 0x22FFFFFF);
-            ctx.fill(menuR - 3, thumbY, menuR - 1, thumbY + thumbH, 0x88AACCFF);
+            GatherTheme.fill(ctx, menuR - 3, CONTENT_TOP, menuR - 1, contentBottom, 0x22FFFFFF);
+            GatherTheme.fill(ctx, menuR - 3, thumbY, menuR - 1, thumbY + thumbH, 0x88AACCFF);
         }
 
         if (GatherState.get().getListCount() >= 10 && statusLine.isEmpty())
@@ -161,16 +162,16 @@ public class GatherTransferScreen extends Screen {
         int menuR = menuRight();
         String tag   = world.isSp() ? "§bSP§r" : "§6MP§r";
         String label = tag + "  " + capitalize(world.displayName());
-        ctx.fill(menuX, y + 1, menuR, y + WORLD_H - 1, 0x33334466);
-        ctx.fill(menuX, y + 1, menuX + 1, y + WORLD_H - 1, 0xFF4466BB);
+        GatherTheme.fill(ctx, menuX, y + 1, menuR, y + WORLD_H - 1, 0x33334466);
+        GatherTheme.fill(ctx, menuX, y + 1, menuX + 1, y + WORLD_H - 1, 0xFF4466BB);
         ctx.drawTextWithShadow(textRenderer, Text.literal(label), menuX + 10, y + 6, 0xFFCCDDFF);
 
         // Import All button
         boolean atCap = GatherState.get().getListCount() >= 10;
         int bx = menuR - BTN_W - 6;
         boolean hov = !atCap && mx >= bx && mx <= bx + BTN_W && my >= y + 3 && my <= y + WORLD_H - 3;
-        ctx.fill(bx, y + 3, bx + BTN_W, y + WORLD_H - 3, atCap ? 0xFF1A1A2A : (hov ? 0xFF334433 : 0xFF1A2A1A));
-        ctx.fill(bx, y + 3, bx + BTN_W, y + 4, atCap ? 0xFF333344 : 0xFF449944);
+        GatherTheme.fill(ctx, bx, y + 3, bx + BTN_W, y + WORLD_H - 3, atCap ? 0xFF1A1A2A : (hov ? 0xFF334433 : 0xFF1A2A1A));
+        GatherTheme.fill(ctx, bx, y + 3, bx + BTN_W, y + 4, atCap ? 0xFF333344 : 0xFF449944);
         String importAllLabel = "Import All";
         ctx.drawTextWithShadow(textRenderer, Text.literal(importAllLabel),
                 bx + (BTN_W - textRenderer.getWidth(importAllLabel)) / 2, y + 7,
@@ -189,7 +190,7 @@ public class GatherTransferScreen extends Screen {
         int menuX = menuLeft();
         int menuR = menuRight();
         int bx   = menuR - BTN_W - 6;
-        ctx.fill(menuX + 10, y + 1, bx - 8, y + ROW_H - 1, done ? 0x22004400 : 0x22001133);
+        GatherTheme.fill(ctx, menuX + 10, y + 1, bx - 8, y + ROW_H - 1, done ? 0x22004400 : 0x22001133);
         String nameText = list.name + "  §8(" + roots + " goal" + (roots == 1 ? "" : "s") + ")";
         int maxNameW = Math.max(40, bx - (menuX + 22));
         ctx.drawTextWithShadow(textRenderer, Text.literal(truncate(nameText, maxNameW)), menuX + 12, y + 5,
@@ -199,9 +200,9 @@ public class GatherTransferScreen extends Screen {
 
         // Import button
         boolean hov = !atCap && mx >= bx && mx <= bx + BTN_W && my >= y + 2 && my <= y + ROW_H - 2;
-        ctx.fill(bx, y + 2, bx + BTN_W, y + ROW_H - 2,
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + ROW_H - 2,
                 atCap ? 0xFF1A1A2A : (done ? 0xFF112211 : (hov ? 0xFF224433 : 0xFF113322)));
-        ctx.fill(bx, y + 2, bx + BTN_W, y + 3,
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + 3,
                 atCap ? 0xFF333344 : (done ? 0xFF337733 : 0xFF337755));
         String btnLabel = done ? "Import again" : "Import";
         ctx.drawTextWithShadow(textRenderer, Text.literal(btnLabel),
@@ -215,13 +216,13 @@ public class GatherTransferScreen extends Screen {
         int menuX = menuLeft();
         int menuR = menuRight();
         int bx = menuR - BTN_W - 6;
-        ctx.fill(menuX + 10, y + 1, bx - 8, y + ROW_H - 1, 0x22001133);
+        GatherTheme.fill(ctx, menuX + 10, y + 1, bx - 8, y + ROW_H - 1, 0x22001133);
         String nameText = list.name + "  §8(" + roots + " goal" + (roots == 1 ? "" : "s") + ")";
         ctx.drawTextWithShadow(textRenderer, Text.literal(truncate(nameText, Math.max(40, bx - (menuX + 22)))),
                 menuX + 12, y + 5, 0xFFCCCCCC);
         boolean hov = mx >= bx && mx <= bx + BTN_W && my >= y + 2 && my <= y + ROW_H - 2;
-        ctx.fill(bx, y + 2, bx + BTN_W, y + ROW_H - 2, hov ? 0xFF224433 : 0xFF113322);
-        ctx.fill(bx, y + 2, bx + BTN_W, y + 3, 0xFF337755);
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + ROW_H - 2, hov ? 0xFF224433 : 0xFF113322);
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + 3, 0xFF337755);
         String btnLabel = "Export";
         ctx.drawTextWithShadow(textRenderer, Text.literal(btnLabel),
                 bx + (BTN_W - textRenderer.getWidth(btnLabel)) / 2, y + 6, 0xFFAAFFCC);
@@ -232,13 +233,13 @@ public class GatherTransferScreen extends Screen {
         int menuX = menuLeft();
         int menuR = menuRight();
         int bx = menuR - BTN_W - 6;
-        ctx.fill(menuX + 10, y + 1, bx - 8, y + ROW_H - 1, 0x22001133);
+        GatherTheme.fill(ctx, menuX + 10, y + 1, bx - 8, y + ROW_H - 1, 0x22001133);
         ctx.drawTextWithShadow(textRenderer, Text.literal(truncate(entry.name(), Math.max(40, bx - (menuX + 22)))),
                 menuX + 12, y + 5, 0xFFCCCCCC);
         boolean atCap = GatherState.get().getListCount() >= 10;
         boolean hov = !atCap && mx >= bx && mx <= bx + BTN_W && my >= y + 2 && my <= y + ROW_H - 2;
-        ctx.fill(bx, y + 2, bx + BTN_W, y + ROW_H - 2, atCap ? 0xFF1A1A2A : (hov ? 0xFF224433 : 0xFF113322));
-        ctx.fill(bx, y + 2, bx + BTN_W, y + 3, atCap ? 0xFF333344 : 0xFF337755);
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + ROW_H - 2, atCap ? 0xFF1A1A2A : (hov ? 0xFF224433 : 0xFF113322));
+        GatherTheme.fill(ctx, bx, y + 2, bx + BTN_W, y + 3, atCap ? 0xFF333344 : 0xFF337755);
         String btnLabel = "Import";
         ctx.drawTextWithShadow(textRenderer, Text.literal(btnLabel),
                 bx + (BTN_W - textRenderer.getWidth(btnLabel)) / 2, y + 6,
@@ -260,8 +261,8 @@ public class GatherTransferScreen extends Screen {
 
     private void drawBottomButton(DrawContext ctx, int mx, int my, int x, int y, int w, String label, boolean active) {
         boolean hov = mx >= x && mx <= x + w && my >= y && my <= y + 18;
-        ctx.fill(x, y, x + w, y + 18, active ? 0xFF334466 : (hov ? 0xFF334455 : 0xFF24344F));
-        ctx.fill(x, y, x + w, y + 1, 0xFF667799);
+        GatherTheme.fill(ctx, x, y, x + w, y + 18, active ? 0xFF334466 : (hov ? 0xFF334455 : 0xFF24344F));
+        GatherTheme.fill(ctx, x, y, x + w, y + 1, 0xFF667799);
         ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(label), x + w / 2, y + 5, 0xFFCCDDFF);
     }
 

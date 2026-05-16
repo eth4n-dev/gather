@@ -1,5 +1,6 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherKeyBindings;
 import com.gather.client.GatherSettings;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
@@ -21,6 +22,7 @@ public class GatherScanKeybindScreen extends Screen {
     private boolean pendingAlt;
     private boolean capturingMenuKey = false;
     private boolean capturingManualKey = false;
+    private String warning = "";
 
     private ButtonWidget shiftBtn;
     private ButtonWidget ctrlBtn;
@@ -56,18 +58,21 @@ public class GatherScanKeybindScreen extends Screen {
 
         shiftBtn = ButtonWidget.builder(modLabel("Shift", pendingShift), btn -> {
             pendingShift = !pendingShift;
+            warning = "";
             btn.setMessage(modLabel("Shift", pendingShift));
         }).dimensions(cx - 100, cy + 26, 60, 20).build();
         addDrawableChild(shiftBtn);
 
         ctrlBtn = ButtonWidget.builder(modLabel("Ctrl", pendingCtrl), btn -> {
             pendingCtrl = !pendingCtrl;
+            warning = "";
             btn.setMessage(modLabel("Ctrl", pendingCtrl));
         }).dimensions(cx - 35, cy + 26, 60, 20).build();
         addDrawableChild(ctrlBtn);
 
         altBtn = ButtonWidget.builder(modLabel("Alt", pendingAlt), btn -> {
             pendingAlt = !pendingAlt;
+            warning = "";
             btn.setMessage(modLabel("Alt", pendingAlt));
         }).dimensions(cx + 30, cy + 26, 60, 20).build();
         addDrawableChild(altBtn);
@@ -76,6 +81,7 @@ public class GatherScanKeybindScreen extends Screen {
             pendingShift = false;
             pendingCtrl  = false;
             pendingAlt   = false;
+            warning = "";
             shiftBtn.setMessage(modLabel("Shift", pendingShift));
             ctrlBtn .setMessage(modLabel("Ctrl",  pendingCtrl));
             altBtn  .setMessage(modLabel("Alt",   pendingAlt));
@@ -122,6 +128,7 @@ public class GatherScanKeybindScreen extends Screen {
             }
             KeyBinding.updateKeysByCode();
             client.options.write();
+            warning = exactConflict() ? "Add Shift, Ctrl, or Alt when both keys match." : "";
             capturingMenuKey = false;
             capturingManualKey = false;
             menuKeyBtn.setMessage(menuKeyLabel());
@@ -133,6 +140,10 @@ public class GatherScanKeybindScreen extends Screen {
     }
 
     private void save() {
+        if (exactConflict()) {
+            warning = "Manual scan cannot exactly match the menu key.";
+            return;
+        }
         GatherSettings s = GatherSettings.get();
         s.scanToggleShift = pendingShift;
         s.scanToggleCtrl  = pendingCtrl;
@@ -143,7 +154,7 @@ public class GatherScanKeybindScreen extends Screen {
 
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
-        ctx.fill(0, 0, width, height, 0xCC111122);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
         int cx = width / 2;
         int cy = height / 2;
         ctx.drawCenteredTextWithShadow(textRenderer, title, cx, cy - 95, 0xFFCCDDFF);
@@ -163,8 +174,17 @@ public class GatherScanKeybindScreen extends Screen {
         if (pendingShift) live.append("Shift+");
         live.append(capturingManualKey ? "..." : keyName);
         ctx.drawCenteredTextWithShadow(textRenderer, Text.literal("Manual scan: " + live), cx, cy + 7, 0xFFAAFF88);
+        if (!warning.isEmpty()) {
+            ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(warning), cx, cy + 88, 0xFFFF7777);
+        }
 
         super.render(ctx, mx, my, delta);
+    }
+
+    private boolean exactConflict() {
+        if (pendingShift || pendingCtrl || pendingAlt) return false;
+        return KeyBindingHelper.getBoundKeyOf(GatherKeyBindings.openMenu)
+                .equals(KeyBindingHelper.getBoundKeyOf(GatherKeyBindings.manualScanToggle));
     }
 
     @Override

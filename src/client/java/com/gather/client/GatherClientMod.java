@@ -41,6 +41,7 @@ public class GatherClientMod implements ClientModInitializer {
         WorldHighlightRenderer.register();
         GatherCraftingOverlay.register();
         GatherShulkerCollectorOverlay.register();
+        GatherTradeCalculatorOverlay.register();
 
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
             dispatcher.register(ClientCommandManager.literal("gather")
@@ -70,20 +71,23 @@ public class GatherClientMod implements ClientModInitializer {
                 client.setScreen(new GatherTutorialScreen());
             }
 
-            while (GatherKeyBindings.openMenu.wasPressed()) {
-                if (client.player == null) return;
-                if (client.currentScreen == null) {
-                    client.setScreen(new GatherMenuScreen());
-                }
-            }
-
+            boolean manualScanHandled = false;
             while (GatherKeyBindings.manualScanToggle.wasPressed()) {
                 if (client.player == null) return;
                 GatherSettings cfg = GatherSettings.get();
                 long handle = client.getWindow().getHandle();
-                if (scanModifiersHeld(cfg, handle) && client.currentScreen == null && cfg.enabled && !cfg.countChests) {
+                if (!exactMenuManualConflict(cfg) && scanModifiersHeld(cfg, handle) && client.currentScreen == null && cfg.enabled && !cfg.countChests) {
                     GatherState s = GatherState.get();
                     s.setChestScanMode(!s.isChestScanMode());
+                    manualScanHandled = true;
+                }
+            }
+
+            while (GatherKeyBindings.openMenu.wasPressed()) {
+                if (client.player == null) return;
+                if (manualScanHandled) continue;
+                if (client.currentScreen == null) {
+                    client.setScreen(new GatherMenuScreen());
                 }
             }
 
@@ -162,6 +166,12 @@ public class GatherClientMod implements ClientModInitializer {
         if (cfg.scanToggleAlt && GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_ALT) != GLFW.GLFW_PRESS
                 && GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_ALT) != GLFW.GLFW_PRESS) return false;
         return true;
+    }
+
+    private static boolean exactMenuManualConflict(GatherSettings cfg) {
+        if (cfg.scanToggleShift || cfg.scanToggleCtrl || cfg.scanToggleAlt) return false;
+        return net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper.getBoundKeyOf(GatherKeyBindings.openMenu)
+                .equals(net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper.getBoundKeyOf(GatherKeyBindings.manualScanToggle));
     }
 
     private static long chunkKey(BlockPos p) {

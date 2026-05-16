@@ -1,5 +1,6 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherClientNetworking;
 import com.gather.client.GatherHud;
 import com.gather.client.GatherSettings;
@@ -117,7 +118,7 @@ public class GatherScanSettingsScreen extends Screen {
             markFeedbackTicks--;
             if (markFeedbackTicks == 0) markBtn.setMessage(Text.literal("Mark Nearby Chests (5x5 chunks)"));
         }
-        ctx.fill(0, 0, width, height, 0xCC111122);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
         int cx = width / 2;
         int cy = height / 2;
         ctx.drawCenteredTextWithShadow(textRenderer, title, cx, cy - 82, 0xFFCCDDFF);

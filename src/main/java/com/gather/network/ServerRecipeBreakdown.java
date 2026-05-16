@@ -24,7 +24,10 @@ public class ServerRecipeBreakdown {
             "minecraft:emerald",
             "minecraft:coal",
             "minecraft:quartz",
-            "minecraft:glowstone_dust"
+            "minecraft:glowstone_dust",
+            // cooked/reversible stone products should stay as gatherable leaves
+            "minecraft:stone",
+            "minecraft:smooth_stone"
     );
 
     public static Map<String, Integer> breakdown(String itemId, int count, int depth, World world) {

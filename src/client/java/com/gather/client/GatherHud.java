@@ -189,9 +189,7 @@ public class GatherHud {
             int bx = settings.layoutManualScanX < 0 ? sw / 2 - bw / 2 : settings.layoutManualScanX;
             int by = settings.layoutManualScanY;
             int textCenterX = bx + bw / 2;
-            context.fill(bx, by, bx + bw, by + bh, 0xCC001A1A);
-            context.fill(bx, by, bx + bw, by + 1, 0xFFFF9944);
-            context.fill(bx, by + bh - 1, bx + bw, by + bh, 0x88AA6622);
+            GatherTheme.drawNineSlice(context, GatherTheme.HUD_MANUAL_SCAN_PANEL, bx, by, bw, bh);
             context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line1), textCenterX, by + 4, 0xFFFFCC44);
             context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line2), textCenterX, by + 15, 0xFFCCBB88);
             context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(line3), textCenterX, by + 26, manualCount == 0 ? 0xFF776655 : 0xFFFFDD99);
@@ -206,7 +204,7 @@ public class GatherHud {
                 String badge = "• SCAN ALL" + (autoCount > 0 ? " (" + autoCount + ")" : "");
                 int bw = client.textRenderer.getWidth(badge) + 8;
                 badgeX -= bw;
-                context.fill(badgeX, badgeY, badgeX + bw, badgeY + 11, 0xAA00332B);
+                GatherTheme.drawNineSlice(context, GatherTheme.HUD_SCAN_ALL_BADGE, badgeX, badgeY, bw, 11);
                 context.drawTextWithShadow(client.textRenderer, Text.literal(badge), badgeX + 4, badgeY + 2, 0xFF33D6AA);
                 badgeY += 13;
                 badgeX = sw - 4;
@@ -216,7 +214,7 @@ public class GatherHud {
                 String badge = "• MANUAL (" + mc + ")";
                 int bw = client.textRenderer.getWidth(badge) + 8;
                 badgeX -= bw;
-                context.fill(badgeX, badgeY, badgeX + bw, badgeY + 11, 0xAA2B1A00);
+                GatherTheme.drawNineSlice(context, GatherTheme.HUD_MANUAL_BADGE, badgeX, badgeY, bw, 11);
                 context.drawTextWithShadow(client.textRenderer, Text.literal(badge), badgeX + 4, badgeY + 2, 0xFFFFAA44);
                 badgeY += 13;
             }
@@ -276,8 +274,7 @@ public class GatherHud {
                 int panelY = settings.layoutFinderY;
                 int panelH = 38;
 
-                context.fill(panelX, panelY, panelX + panelW, panelY + panelH, 0xCC1A0000);
-                context.fill(panelX, panelY, panelX + panelW, panelY + 1, 0xFFFF4444);
+                GatherTheme.drawNineSlice(context, GatherTheme.HUD_FINDER_PANEL, panelX, panelY, panelW, panelH);
 
                 int tx = panelX + 4;
                 if (finderItem != null) {
@@ -337,9 +334,7 @@ public class GatherHud {
                 int pw = tw2 + 18;
                 int px = toastCenterX - pw / 2;
                 int py = settings.layoutToastY + (toastQueue.size() - 1 - ti) * 18;
-                context.fill(px, py, px + pw, py + 14, (a << 24) | 0x001A00);
-                context.fill(px, py, px + pw, py + 1, (a << 24) | 0x33CC66);
-                context.fill(px, py + 13, px + pw, py + 14, (a << 24) | 0x1A6633);
+                GatherTheme.drawNineSliceTint(context, GatherTheme.HUD_TOAST_PANEL, px, py, pw, 14, (a << 24) | 0xFFFFFF);
                 context.drawTextWithShadow(client.textRenderer, Text.literal(msg), px + 9, py + 3, (a << 24) | 0xAAFFCC);
             }
         }
@@ -380,7 +375,8 @@ public class GatherHud {
             int needed    = root.needed();
             boolean ready = root.ready();
 
-            context.fill(x, y, x + 80, y + ROW_H_GOAL - 2, ready ? 0xAA002200 : 0xAA00001A);
+            GatherTheme.drawNineSlice(context, ready ? GatherTheme.HUD_GOAL_ROW_READY : GatherTheme.HUD_GOAL_ROW,
+                    x, y, 80, ROW_H_GOAL - 2);
             context.drawItem(stack, x + 1, y + 2);
 
             String haveBadge;
@@ -419,10 +415,9 @@ public class GatherHud {
 
             float prog = root.leafProgress();
             int lineW = (int)(80 * prog);
-            int barCol = prog >= 1f ? 0x44DD66 : (prog > 0.5f ? 0xFFDD33 : (prog > 0f ? 0xFF8833 : 0x664444));
-            context.fill(x, y + ROW_H_GOAL - 2, x + 80, y + ROW_H_GOAL - 1, 0x33000000);
+            GatherTheme.drawStretch(context, GatherTheme.HUD_PROGRESS_TRACK, x, y + ROW_H_GOAL - 2, 80, 1);
             if (lineW > 0)
-                context.fill(x, y + ROW_H_GOAL - 2, x + lineW, y + ROW_H_GOAL - 1, 0xFF000000 | barCol);
+                GatherTheme.drawStretch(context, progressFillTexture(prog), x, y + ROW_H_GOAL - 2, lineW, 1);
 
             y += ROW_H_GOAL;
         }
@@ -430,7 +425,7 @@ public class GatherHud {
             int ox = Math.max(0, settings.layoutGoalsX) + (goalCols - 1) * colW;
             int oy = topY + maxContentH - 11;
             String more = "+" + hiddenGoalRows + " more";
-            context.fill(ox, oy, ox + 80, oy + 10, 0xAA111122);
+            GatherTheme.drawNineSlice(context, GatherTheme.HUD_MORE_ROW, ox, oy, 80, 10);
             context.drawTextWithShadow(client.textRenderer, Text.literal(more), ox + 2, oy + 1, 0xFFFFAA44);
         }
 
@@ -455,36 +450,42 @@ public class GatherHud {
             int rx   = matStartX + col * matColW + materialXShift(entry, now);
             int ry   = matRowStartY + row * ROW_H_MAT;
 
-            context.fill(rx + 77, ry, rx + 80, ry + ROW_H_MAT - 2, (a << 24) | 0xBB7722);
+            GatherTheme.drawStretchTint(context, GatherTheme.HUD_MATERIAL_ACCENT,
+                    rx + 77, ry, 3, ROW_H_MAT - 2, (a << 24) | 0xFFFFFF);
 
             if (completing) {
                 float pulse = (float)(0.5 + 0.5 * Math.sin(now * 0.020));
                 int bgG = (int)(0x33 + pulse * 0x55);
-                context.fill(rx, ry, rx + 80, ry + ROW_H_MAT - 2, (a << 24) | (bgG << 8));
+                GatherTheme.drawNineSliceTint(context, GatherTheme.HUD_TINT_ROW,
+                        rx, ry, 80, ROW_H_MAT - 2, (a << 24) | (bgG << 8));
                 context.drawItem(stack, rx + 1, ry);
                 context.drawTextWithShadow(client.textRenderer,
                         Text.literal(need + "/" + need), rx + 19, ry + 4, (a << 24) | 0x55FF55);
-                context.fill(rx, ry + ROW_H_MAT - 2, rx + 80, ry + ROW_H_MAT - 1, (a / 4 << 24) | 0x000000);
-                context.fill(rx, ry + ROW_H_MAT - 2, rx + 80, ry + ROW_H_MAT - 1, (a << 24) | 0x44EE66);
+                GatherTheme.drawStretchTint(context, GatherTheme.HUD_PROGRESS_BLACK,
+                        rx, ry + ROW_H_MAT - 2, 80, 1, (a / 4 << 24) | 0xFFFFFF);
+                GatherTheme.drawStretchTint(context, GatherTheme.HUD_PROGRESS_FILL_COMPLETE,
+                        rx, ry + ROW_H_MAT - 2, 80, 1, (a << 24) | 0xFFFFFF);
             } else {
                 float progress = need > 0 ? Math.min(1f, (float) have / need) : 1f;
                 int bgBase  = have >= need ? 0x00AA44 : 0x220033;
                 int bgAlpha = (int)(alpha * 0x88);
-                context.fill(rx, ry, rx + 80, ry + ROW_H_MAT - 2, (bgAlpha << 24) | bgBase);
+                GatherTheme.drawNineSliceTint(context, GatherTheme.HUD_TINT_ROW,
+                        rx, ry, 80, ROW_H_MAT - 2, (bgAlpha << 24) | bgBase);
                 context.drawItem(stack, rx + 1, ry);
                 if (alpha < 1f) {
                     int maskA = (int)((1f - alpha) * 230);
-                    context.fill(rx + 1, ry, rx + 17, ry + 16, maskA << 24);
+                    GatherTheme.drawTint(context, GatherTheme.HUD_ITEM_FADE_MASK, rx + 1, ry, maskA << 24);
                 }
                 int rawCol = have >= need ? 0x88FF88 : (have > 0 ? 0xFFFF55 : 0xFF6666);
                 context.drawTextWithShadow(client.textRenderer,
                         Text.literal(have + "/" + need), rx + 19, ry + 4, (a << 24) | (rawCol & 0xFFFFFF));
                 int lineW      = (int)(80 * progress);
-                int rawLineCol = progress >= 1f ? 0x44DD66 : (progress > 0 ? 0xFFDD33 : 0x664444);
                 int lineAlpha  = (int)(alpha * 0xFF);
-                context.fill(rx, ry + ROW_H_MAT - 2, rx + 80, ry + ROW_H_MAT - 1, (lineAlpha / 4 << 24) | 0x000000);
+                GatherTheme.drawStretchTint(context, GatherTheme.HUD_PROGRESS_BLACK,
+                        rx, ry + ROW_H_MAT - 2, 80, 1, (lineAlpha / 4 << 24) | 0xFFFFFF);
                 if (lineW > 0)
-                    context.fill(rx, ry + ROW_H_MAT - 2, rx + lineW, ry + ROW_H_MAT - 1, (lineAlpha << 24) | rawLineCol);
+                    GatherTheme.drawStretchTint(context, progressFillTexture(progress),
+                            rx, ry + ROW_H_MAT - 2, lineW, 1, (lineAlpha << 24) | 0xFFFFFF);
             }
         }
         // === RENDER CRAFT HINTS ===
@@ -516,7 +517,8 @@ public class GatherHud {
 
                 float pulse = (float)(0.5 + 0.5 * Math.sin(now * 0.003));
                 int bgG = (int)(0x22 + pulse * 0x33);
-                context.fill(x, y, x + maxRowW, y + ROW_H_HINT - 2, (0xAA << 24) | (bgG << 8));
+                GatherTheme.drawNineSliceTint(context, GatherTheme.HUD_TINT_ROW,
+                        x, y, maxRowW, ROW_H_HINT - 2, (0xAA << 24) | (bgG << 8));
 
                 // Up to 2 leaf icons on the left
                 List<ItemStack> leafStacks = hint.leafStacks();
@@ -542,6 +544,13 @@ public class GatherHud {
                         Text.literal(cnt), rootX + 17, y + 6, 0xFF88FF88);
             }
         }
+    }
+
+    private static GatherTheme.Texture progressFillTexture(float progress) {
+        if (progress >= 1f) return GatherTheme.HUD_PROGRESS_FILL_COMPLETE;
+        if (progress > 0.5f) return GatherTheme.HUD_PROGRESS_FILL_PARTIAL;
+        if (progress > 0f) return GatherTheme.HUD_PROGRESS_FILL_LOW;
+        return GatherTheme.HUD_PROGRESS_FILL_EMPTY;
     }
 
     private static HudModel getHudModel(MinecraftClient client, GatherState state, long now) {

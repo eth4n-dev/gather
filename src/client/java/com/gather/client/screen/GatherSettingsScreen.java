@@ -1,5 +1,6 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherHud;
 import com.gather.client.GatherClientNetworking;
 import com.gather.client.GatherSettings;
@@ -27,6 +28,13 @@ public class GatherSettingsScreen extends Screen {
     private int visualPanelY;
     private int prefPanelY;
     private int cardFirstButtonY;
+    private int bSpacing;
+    private boolean settingsCompact;
+    private boolean settingsSuperCompact;
+    private int settingsScroll;
+    private int maxSettingsScroll;
+    private int prefColX;
+    private int prefPanelWidth;
 
     public GatherSettingsScreen(Screen parent) {
         super(Text.literal("Gather Settings"));
@@ -35,15 +43,31 @@ public class GatherSettingsScreen extends Screen {
 
     @Override
     protected void init() {
+        settingsCompact = height < 372;
+        settingsSuperCompact = height < 300;
         panelGap = 12;
         panelPad = 10;
-        cardFirstButtonY = 29;
-        panelW = Math.min(154, Math.max(124, (width - 44 - panelGap) / 2));
-        layoutWidth = panelW * 2 + panelGap;
+        cardFirstButtonY = settingsCompact ? 24 : 29;
+        bSpacing = settingsCompact ? 26 : 28;
+        if (settingsSuperCompact) {
+            panelW = Math.max(90, (width - 44 - panelGap * 2) / 3);
+            layoutWidth = panelW * 3 + panelGap * 2;
+        } else {
+            panelW = Math.min(154, Math.max(124, (width - 44 - panelGap) / 2));
+            layoutWidth = panelW * 2 + panelGap;
+        }
         layoutLeft = width / 2 - layoutWidth / 2;
-        layoutTop = Math.max(26, height / 2 - 170);
-        visualPanelY = layoutTop + 66;
-        prefPanelY = visualPanelY + 118 + 14;
+        layoutTop = Math.max(settingsCompact ? 22 : 26, height / 2 - 170) - settingsScroll;
+        visualPanelY = layoutTop + (settingsCompact ? 58 : 66);
+        if (settingsSuperCompact) {
+            prefPanelY = visualPanelY;
+            prefColX = layoutLeft + 2 * (panelW + panelGap);
+            prefPanelWidth = panelW;
+        } else {
+            prefPanelY = visualPanelY + (settingsCompact ? 102 : 118) + (settingsCompact ? 8 : 14);
+            prefColX = layoutLeft;
+            prefPanelWidth = layoutWidth;
+        }
         int cx = width / 2;
         int buttonW = panelW - panelPad * 2;
 
@@ -71,7 +95,7 @@ public class GatherSettingsScreen extends Screen {
 
         ButtonWidget xraySettingsBtn = ButtonWidget
                 .builder(Text.literal("Xray / Glow"), btn -> client.setScreen(new GatherXraySettingsScreen(this)))
-                .dimensions(layoutLeft + panelPad, visualPanelY + cardFirstButtonY + 28, buttonW, 20)
+                .dimensions(layoutLeft + panelPad, visualPanelY + cardFirstButtonY + bSpacing, buttonW, 20)
                 .build();
         xraySettingsBtn.active = GatherState.isServerXrayAllowed();
         addDrawableChild(xraySettingsBtn);
@@ -82,7 +106,7 @@ public class GatherSettingsScreen extends Screen {
                     GatherSettings.get().save();
                     btn.setMessage(stateText("Menu Spin", GatherSettings.get().menuSpinAnimation));
                 })
-                .dimensions(layoutLeft + panelPad, visualPanelY + cardFirstButtonY + 56, buttonW, 20)
+                .dimensions(layoutLeft + panelPad, visualPanelY + cardFirstButtonY + bSpacing * 2, buttonW, 20)
                 .build());
 
         int workflowX = layoutLeft + panelW + panelGap;
@@ -93,35 +117,71 @@ public class GatherSettingsScreen extends Screen {
 
         addDrawableChild(ButtonWidget
                 .builder(Text.literal("Imports / Exports"), btn -> client.setScreen(new GatherTransferScreen(this)))
-                .dimensions(workflowX + panelPad, visualPanelY + cardFirstButtonY + 28, buttonW, 20)
+                .dimensions(workflowX + panelPad, visualPanelY + cardFirstButtonY + bSpacing, buttonW, 20)
                 .build());
 
         addDrawableChild(ButtonWidget
                 .builder(Text.literal("Controls"), btn -> client.setScreen(new GatherScanKeybindScreen(this)))
-                .dimensions(workflowX + panelPad, visualPanelY + cardFirstButtonY + 56, buttonW, 20)
+                .dimensions(workflowX + panelPad, visualPanelY + cardFirstButtonY + bSpacing * 2, buttonW, 20)
                 .build());
 
-        int prefButtonGap = 12;
-        int prefButtonW = (layoutWidth - panelPad * 2 - prefButtonGap) / 2;
-        addDrawableChild(ButtonWidget
-                .builder(stateText("Goal Sound", GatherSettings.get().goalSoundEnabled), btn -> {
-                    GatherSettings.get().goalSoundEnabled = !GatherSettings.get().goalSoundEnabled;
-                    GatherSettings.get().save();
-                    btn.setMessage(stateText("Goal Sound", GatherSettings.get().goalSoundEnabled));
-                })
-                .dimensions(layoutLeft + panelPad, prefPanelY + cardFirstButtonY, prefButtonW, 20)
-                .build());
+        if (settingsSuperCompact) {
+            int pbw = prefPanelWidth - panelPad * 2;
+            addDrawableChild(ButtonWidget
+                    .builder(stateText("Goal Sound", GatherSettings.get().goalSoundEnabled), btn -> {
+                        GatherSettings.get().goalSoundEnabled = !GatherSettings.get().goalSoundEnabled;
+                        GatherSettings.get().save();
+                        btn.setMessage(stateText("Goal Sound", GatherSettings.get().goalSoundEnabled));
+                    })
+                    .dimensions(prefColX + panelPad, prefPanelY + cardFirstButtonY, pbw, 20)
+                    .build());
+            addDrawableChild(ButtonWidget
+                    .builder(stateText("Auto Remove", GatherSettings.get().autoRemoveCompleted), btn -> {
+                        GatherSettings.get().autoRemoveCompleted = !GatherSettings.get().autoRemoveCompleted;
+                        GatherSettings.get().save();
+                        btn.setMessage(stateText("Auto Remove", GatherSettings.get().autoRemoveCompleted));
+                    })
+                    .dimensions(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing, pbw, 20)
+                    .build());
+            addDrawableChild(ButtonWidget
+                    .builder(Text.literal("Theme: Modern"), btn -> {})
+                    .dimensions(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing * 2, pbw, 20)
+                    .build());
+        } else {
+            int prefButtonGap = 12;
+            int prefButtonW = (prefPanelWidth - panelPad * 2 - prefButtonGap) / 2;
+            addDrawableChild(ButtonWidget
+                    .builder(stateText("Goal Sound", GatherSettings.get().goalSoundEnabled), btn -> {
+                        GatherSettings.get().goalSoundEnabled = !GatherSettings.get().goalSoundEnabled;
+                        GatherSettings.get().save();
+                        btn.setMessage(stateText("Goal Sound", GatherSettings.get().goalSoundEnabled));
+                    })
+                    .dimensions(prefColX + panelPad, prefPanelY + cardFirstButtonY, prefButtonW, 20)
+                    .build());
+            addDrawableChild(ButtonWidget
+                    .builder(stateText("Auto Remove", GatherSettings.get().autoRemoveCompleted), btn -> {
+                        GatherSettings.get().autoRemoveCompleted = !GatherSettings.get().autoRemoveCompleted;
+                        GatherSettings.get().save();
+                        btn.setMessage(stateText("Auto Remove", GatherSettings.get().autoRemoveCompleted));
+                    })
+                    .dimensions(prefColX + panelPad + prefButtonW + prefButtonGap, prefPanelY + cardFirstButtonY, prefButtonW, 20)
+                    .build());
+            addDrawableChild(ButtonWidget
+                    .builder(Text.literal("Theme: Modern"), btn -> {})
+                    .dimensions(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing, prefPanelWidth - panelPad * 2, 20)
+                    .build());
+        }
 
-        addDrawableChild(ButtonWidget
-                .builder(stateText("Auto Remove", GatherSettings.get().autoRemoveCompleted), btn -> {
-                    GatherSettings.get().autoRemoveCompleted = !GatherSettings.get().autoRemoveCompleted;
-                    GatherSettings.get().save();
-                    btn.setMessage(stateText("Auto Remove", GatherSettings.get().autoRemoveCompleted));
-                })
-                .dimensions(layoutLeft + panelPad + prefButtonW + prefButtonGap, prefPanelY + cardFirstButtonY, prefButtonW, 20)
-                .build());
-
-        int footerY = prefPanelY + 88;
+        int visPanelH = settingsCompact ? 102 : 118;
+        int footerY = settingsSuperCompact
+                ? visualPanelY + visPanelH + 8
+                : prefPanelY + (settingsCompact ? 82 : 116);
+        maxSettingsScroll = Math.max(0, footerY + (settingsCompact ? 26 : 32) + settingsScroll - height);
+        if (settingsScroll > maxSettingsScroll) {
+            settingsScroll = maxSettingsScroll;
+            rebuildSettingsWidgets();
+            return;
+        }
         int footerGap = 8;
         int footerButtonW = 86;
         int footerX = cx - (footerButtonW * 3 + footerGap * 2) / 2;
@@ -144,27 +204,67 @@ public class GatherSettingsScreen extends Screen {
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
         hoveredTooltipLines = null;
-        ctx.fill(0, 0, width, height, 0xCC111122);
-        ctx.drawCenteredTextWithShadow(textRenderer, title, width / 2, layoutTop + 6, 0xFFCCDDFF);
-        drawPanel(ctx, layoutLeft, visualPanelY, panelW, 118, "Visuals");
-        drawPanel(ctx, layoutLeft + panelW + panelGap, visualPanelY, panelW, 118, "Workflow");
-        drawPanel(ctx, layoutLeft, prefPanelY, layoutWidth, 70, "Preferences");
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
+        ctx.drawCenteredTextWithShadow(textRenderer, title, width / 2, 12, 0xFFCCDDFF);
+        int visPanelH  = settingsCompact ? 102 : 118;
+        int prefPanelH = settingsSuperCompact ? 102 : (settingsCompact ? 76 : 98);
+        drawPanel(ctx, layoutLeft, visualPanelY, panelW, visPanelH, "Visuals");
+        drawPanel(ctx, layoutLeft + panelW + panelGap, visualPanelY, panelW, visPanelH, "Workflow");
+        drawPanel(ctx, prefColX, prefPanelY, prefPanelWidth, prefPanelH, "Preferences");
         String version = FabricLoader.getInstance().getModContainer("gather")
                 .map(c -> "v" + c.getMetadata().getVersion().getFriendlyString())
                 .orElse("");
-        ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(version), width / 2, prefPanelY + 113, 0xFF2A3A4A);
+        int approxFooterY = settingsSuperCompact ? visualPanelY + visPanelH + 8 : prefPanelY + (settingsCompact ? 82 : 116);
+        boolean versionFits = (height - (approxFooterY + 26)) >= 12;
+        if (versionFits) {
+            int versionY = settingsCompact ? height - 10 : prefPanelY + 104;
+            ctx.drawCenteredTextWithShadow(textRenderer, Text.literal(version), width / 2, versionY, 0xFF2A3A4A);
+        }
         super.render(ctx, mx, my, delta);
+        drawScrollIndicator(ctx);
         drawHoverInfo(mx, my);
         if (hoveredTooltipLines != null) ctx.drawTooltip(textRenderer, hoveredTooltipLines, tooltipX, tooltipY);
     }
 
+    @Override
+    public boolean mouseScrolled(double mx, double my, double hx, double vy) {
+        if (maxSettingsScroll <= 0) return super.mouseScrolled(mx, my, hx, vy);
+        int next = Math.max(0, Math.min(maxSettingsScroll, settingsScroll - (int) Math.signum(vy) * 18));
+        if (next == settingsScroll) return true;
+        settingsScroll = next;
+        rebuildSettingsWidgets();
+        return true;
+    }
+
+    private void rebuildSettingsWidgets() {
+        clearChildren();
+        init();
+    }
+
+    private void drawScrollIndicator(DrawContext ctx) {
+        if (maxSettingsScroll <= 0) return;
+        int trackX = width - 7;
+        int trackTop = 28;
+        int trackBottom = height - 28;
+        if (trackBottom <= trackTop + 10) return;
+
+        GatherTheme.fill(ctx, trackX, trackTop, trackX + 3, trackBottom, 0x66334466);
+        int trackH = trackBottom - trackTop;
+        int thumbH = Math.max(12, trackH * trackH / Math.max(trackH + maxSettingsScroll, 1));
+        int thumbY = trackTop + (trackH - thumbH) * settingsScroll / Math.max(maxSettingsScroll, 1);
+        GatherTheme.fill(ctx, trackX - 1, thumbY, trackX + 4, thumbY + thumbH, 0xCC88CCFF);
+        if (width >= 190) {
+            ctx.drawTextWithShadow(textRenderer, Text.literal("Scroll"), width - textRenderer.getWidth("Scroll") - 12, 12, 0xFF88AACC);
+        }
+    }
+
     private void drawPanel(DrawContext ctx, int x, int y, int w, int h, String label) {
-        ctx.fill(x + 3, y + 3, x + w + 3, y + h + 3, 0x66000000);
-        ctx.fill(x + 1, y + h, x + w + 2, y + h + 3, 0x55000000);
-        ctx.fill(x + w, y + 1, x + w + 3, y + h + 2, 0x44000000);
-        ctx.fill(x, y, x + w, y + h, 0x66182438);
-        ctx.fill(x, y, x + w, y + 1, 0x88556688);
-        ctx.fill(x, y, x + 1, y + h, 0x55334466);
+        GatherTheme.fill(ctx, x + 3, y + 3, x + w + 3, y + h + 3, 0x66000000);
+        GatherTheme.fill(ctx, x + 1, y + h, x + w + 2, y + h + 3, 0x55000000);
+        GatherTheme.fill(ctx, x + w, y + 1, x + w + 3, y + h + 2, 0x44000000);
+        GatherTheme.fill(ctx, x, y, x + w, y + h, 0x66182438);
+        GatherTheme.fill(ctx, x, y, x + w, y + 1, 0x88556688);
+        GatherTheme.fill(ctx, x, y, x + 1, y + h, 0x55334466);
         ctx.drawTextWithShadow(textRenderer, Text.literal(label), x + panelPad, y + 10, 0xFF99AACC);
     }
 
@@ -178,7 +278,9 @@ public class GatherSettingsScreen extends Screen {
         int buttonW = panelW - panelPad * 2;
         int workflowX = layoutLeft + panelW + panelGap;
         int prefButtonGap = 12;
-        int prefButtonW = (layoutWidth - panelPad * 2 - prefButtonGap) / 2;
+        int prefButtonW = settingsSuperCompact
+                ? prefPanelWidth - panelPad * 2
+                : (prefPanelWidth - panelPad * 2 - prefButtonGap) / 2;
         if (inside(mx, my, layoutLeft, layoutTop + 24, layoutWidth, 20)) {
             setTooltip(mx, my,
                     Text.literal("Master switch for Gather runtime features."),
@@ -188,11 +290,11 @@ public class GatherSettingsScreen extends Screen {
             setTooltip(mx, my,
                     Text.literal("Settings for normal block outlines and block xray outlines."),
                     Text.literal("Includes on/off, range, max count, and color."));
-        } else if (inside(mx, my, layoutLeft + panelPad, visualPanelY + cardFirstButtonY + 28, buttonW, 20)) {
+        } else if (inside(mx, my, layoutLeft + panelPad, visualPanelY + cardFirstButtonY + bSpacing, buttonW, 20)) {
             setTooltip(mx, my,
                     Text.literal("Toggle xray glow for dropped items and placed blocks."),
                     Text.literal("Each has an independent on/off switch."));
-        } else if (inside(mx, my, layoutLeft + panelPad, visualPanelY + cardFirstButtonY + 56, buttonW, 20)) {
+        } else if (inside(mx, my, layoutLeft + panelPad, visualPanelY + cardFirstButtonY + bSpacing * 2, buttonW, 20)) {
             setTooltip(mx, my,
                     Text.literal("Spin the Gather menu while it opens and closes."),
                     Text.literal("OFF keeps the regular scale animation."));
@@ -200,21 +302,27 @@ public class GatherSettingsScreen extends Screen {
             setTooltip(mx, my,
                     Text.literal("Options for Scan All, including marking nearby chests"),
                     Text.literal("so they appear in scan results."));
-        } else if (inside(mx, my, workflowX + panelPad, visualPanelY + cardFirstButtonY + 28, buttonW, 20)) {
+        } else if (inside(mx, my, workflowX + panelPad, visualPanelY + cardFirstButtonY + bSpacing, buttonW, 20)) {
             setTooltip(mx, my,
                     Text.literal("Import from other worlds or JSON files."),
                     Text.literal("Exported JSON files go in the Gather exchange folder."));
-        } else if (inside(mx, my, workflowX + panelPad, visualPanelY + cardFirstButtonY + 56, buttonW, 20)) {
+        } else if (inside(mx, my, workflowX + panelPad, visualPanelY + cardFirstButtonY + bSpacing * 2, buttonW, 20)) {
             setTooltip(mx, my,
                     Text.literal("Configure the Gather key and scan-toggle modifier combo."),
                     Text.literal("Use this to separate opening the menu from manual scan mode."));
-        } else if (inside(mx, my, layoutLeft + panelPad, prefPanelY + cardFirstButtonY, prefButtonW, 20)) {
+        } else if (inside(mx, my, prefColX + panelPad, prefPanelY + cardFirstButtonY, prefButtonW, 20)) {
             setTooltip(mx, my,
                     Text.literal("Play a sound when a goal's materials are fully gathered."));
-        } else if (inside(mx, my, layoutLeft + panelPad + prefButtonW + prefButtonGap, prefPanelY + cardFirstButtonY, prefButtonW, 20)) {
+        } else if (settingsSuperCompact
+                ? inside(mx, my, prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing, prefButtonW, 20)
+                : inside(mx, my, prefColX + panelPad + prefButtonW + prefButtonGap, prefPanelY + cardFirstButtonY, prefButtonW, 20)) {
             setTooltip(mx, my,
                     Text.literal("Automatically remove goals once all materials are gathered."),
                     Text.literal("Goals are permanently deleted; they won't come back."));
+        } else if (inside(mx, my, prefColX + panelPad, prefPanelY + cardFirstButtonY + (settingsSuperCompact ? bSpacing * 2 : bSpacing), prefPanelWidth - panelPad * 2, 20)) {
+            setTooltip(mx, my,
+                    Text.literal("Only the Modern theme is currently available."),
+                    Text.literal("More themes coming soon."));
         }
     }
 

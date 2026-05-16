@@ -1,5 +1,6 @@
 package com.gather.client.screen;
 
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherState;
 import com.gather.client.GatherUi;
 import com.gather.client.ListNode;
@@ -202,7 +203,7 @@ public class GatherChestFinderScreen extends Screen {
         int cx = width / 2;
         int lx = listX();
 
-        ctx.fill(0, 0, width, height, 0xCC111122);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC111122);
 
         // Title + active label
         ctx.drawCenteredTextWithShadow(textRenderer, title, cx, 10, 0xFFCCDDFF);
@@ -215,12 +216,12 @@ public class GatherChestFinderScreen extends Screen {
         }
 
         // Search field background
-        ctx.fill(lx - 1, listTop() - 23, lx + LIST_W - 83, listTop() - 3, 0xFF1A2A3A);
+        GatherTheme.fill(ctx, lx - 1, listTop() - 23, lx + LIST_W - 83, listTop() - 3, 0xFF1A2A3A);
         searchField.render(ctx, mx, my, delta);
 
         // List border + background
-        ctx.fill(lx - 1, listTop() - 1, lx + LIST_W + 1, listBottom() + 1, 0xFF223344);
-        ctx.fill(lx, listTop(), lx + LIST_W, listBottom(), 0xFF0A1522);
+        GatherTheme.fill(ctx, lx - 1, listTop() - 1, lx + LIST_W + 1, listBottom() + 1, 0xFF223344);
+        GatherTheme.fill(ctx, lx, listTop(), lx + LIST_W, listBottom(), 0xFF0A1522);
 
         // Rows
         int visible = visibleRows();
@@ -232,10 +233,10 @@ public class GatherChestFinderScreen extends Screen {
             boolean hovered  = mx >= lx && mx < lx + LIST_W && my >= rowY && my < rowY + ROW_H;
             boolean selected = entry.itemId().equals(current);
 
-            ctx.fill(lx, rowY, lx + LIST_W, rowY + ROW_H - 1,
+            GatherTheme.fill(ctx, lx, rowY, lx + LIST_W, rowY + ROW_H - 1,
                     selected ? 0xFF3A0A0A : (hovered ? 0xFF1A2A3A : 0xFF0A1522));
             if (selected)
-                ctx.fill(lx, rowY, lx + 2, rowY + ROW_H - 1, 0xFFFF4444);
+                GatherTheme.fill(ctx, lx, rowY, lx + 2, rowY + ROW_H - 1, 0xFFFF4444);
 
             Item item = Registries.ITEM.get(Identifier.of(entry.itemId()));
             if (item != null) ctx.drawItem(item.getDefaultStack(), lx + 3, rowY + 3);
@@ -256,7 +257,7 @@ public class GatherChestFinderScreen extends Screen {
                     lx + LIST_W - cw - 5, rowY + 7, 0xFF7799BB);
 
             // Row separator
-            ctx.fill(lx, rowY + ROW_H - 1, lx + LIST_W, rowY + ROW_H, 0xFF0E1A28);
+            GatherTheme.fill(ctx, lx, rowY + ROW_H - 1, lx + LIST_W, rowY + ROW_H, 0xFF0E1A28);
         }
 
         // Empty state
@@ -283,8 +284,8 @@ public class GatherChestFinderScreen extends Screen {
             int thumbH  = Math.max(20, trackH * visible / shown.size());
             int maxScroll = Math.max(1, shown.size() - visible);
             int thumbY  = listTop() + (trackH - thumbH) * scrollOffset / maxScroll;
-            ctx.fill(scrollX, listTop(), scrollX + SCROLL_W, listBottom(), 0xFF0E1A28);
-            ctx.fill(scrollX + 1, thumbY + 1, scrollX + SCROLL_W - 1, thumbY + thumbH - 1,
+            GatherTheme.fill(ctx, scrollX, listTop(), scrollX + SCROLL_W, listBottom(), 0xFF0E1A28);
+            GatherTheme.fill(ctx, scrollX + 1, thumbY + 1, scrollX + SCROLL_W - 1, thumbY + thumbH - 1,
                     draggingScrollbar ? 0xFF99BBDD : 0xFF446688);
         }
 
