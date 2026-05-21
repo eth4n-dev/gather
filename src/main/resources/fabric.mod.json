@@ -10,13 +10,15 @@
     "sources": "https://github.com/eth4n-dev/gather",
     "issues": "https://github.com/eth4n-dev/gather/issues"
   },
+  "update_url": "https://obl1v1on.xyz/gather/version.json",
   "license": "GPL-3.0-or-later",
   "icon": "assets/gather/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": ["com.gather.GatherMod"],
     "client": ["com.gather.client.GatherClientMod"],
-    "modmenu": ["com.gather.client.GatherModMenuIntegration"]
+    "modmenu": ["com.gather.client.GatherModMenuIntegration"],
+    "jei_mod_plugin": ["com.gather.client.compat.jei.GatherJeiPlugin"]
   },
   "mixins": [
     "gather.mixins.json",
@@ -30,6 +32,7 @@
   },
   "suggests": {
     "modmenu": "*",
+    "jei": "*",
     "whereisit": "*"
   }
 }

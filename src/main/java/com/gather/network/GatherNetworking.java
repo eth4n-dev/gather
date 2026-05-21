@@ -49,6 +49,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import com.gather.network.BreakdownEntry;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.UUID;
@@ -380,7 +381,7 @@ public class GatherNetworking {
         ServerPlayNetworking.registerGlobalReceiver(BreakdownRequestPayload.ID, (payload, context) -> {
             ServerPlayer player = context.player();
             ServerLevel world = (ServerLevel) player.level();
-            Map<String, Integer> result = ServerRecipeBreakdown.breakdown(
+            List<BreakdownEntry> result = ServerRecipeBreakdown.breakdown(
                     payload.itemId(), payload.count(), payload.depth(), world);
             boolean invCraftable = ServerRecipeBreakdown.isInventoryCraftable(payload.itemId(), world);
             ServerPlayNetworking.send(player, new BreakdownResultPayload(payload.itemId(), result, invCraftable));

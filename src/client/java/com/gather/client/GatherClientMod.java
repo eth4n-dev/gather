@@ -24,6 +24,12 @@ public class GatherClientMod implements ClientModInitializer {
 
     private static final java.util.Map<String, Item> ITEM_LOOKUP_CACHE = new java.util.HashMap<>();
 
+    // Update checker
+    private static final String UPDATE_CHECK_URL = "https://obl1v1on.xyz/gather/version.json";
+    private static final String MC_CHANNEL = "26.1";
+    public static volatile String updateAvailableVersion = null;
+    public static volatile long   updateNotifStartMs     = 0L;
+
     private int autoSyncTimer     = 0;
     private int chestRefreshTimer = 0;
     private int fallbackRefreshIndex = 0;
@@ -42,6 +48,7 @@ public class GatherClientMod implements ClientModInitializer {
         GatherCraftingOverlay.register();
         GatherTradeCalculatorOverlay.register();
         GatherShulkerCollectorOverlay.register();
+        GatherJeiAddOverlay.register();
 
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
             dispatcher.register(ClientCommands.literal("gather")
@@ -55,6 +62,7 @@ public class GatherClientMod implements ClientModInitializer {
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             GatherState.loadForWorld(client);
             if (GatherSettings.get().enabled && !GatherSettings.get().hasShownWelcome) pendingHelpScreen = true;
+            checkForUpdate();
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             GatherState.unload();
@@ -65,6 +73,7 @@ public class GatherClientMod implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             GatherState.flushPendingSaveIfDue();
+            GatherHud.handlePageKeys(client);
 
             if (pendingHelpScreen && client.player != null && client.screen == null) {
                 pendingHelpScreen = false;
@@ -176,6 +185,74 @@ public class GatherClientMod implements ClientModInitializer {
 
     private static long chunkKey(BlockPos p) {
         return ((long)(p.getX() >> 4) << 32) | ((p.getZ() >> 4) & 0xFFFFFFFFL);
+    }
+
+    private static void checkForUpdate() {
+        if (!GatherSettings.get().updateNotifications || GatherSettings.get().suppressUpdateNotif) return;
+        Thread t = new Thread(() -> {
+            try {
+                java.net.HttpURLConnection con = (java.net.HttpURLConnection)
+                        java.net.URI.create(UPDATE_CHECK_URL).toURL().openConnection();
+                con.setConnectTimeout(5000);
+                con.setReadTimeout(5000);
+                con.setRequestProperty("User-Agent", "Gather/Minecraft");
+                if (con.getResponseCode() != 200) return;
+                com.google.gson.JsonObject obj;
+                try (java.io.InputStreamReader r = new java.io.InputStreamReader(con.getInputStream())) {
+                    obj = com.google.gson.JsonParser.parseReader(r).getAsJsonObject();
+                }
+                com.google.gson.JsonObject promos = obj.getAsJsonObject("promos");
+                if (promos == null) return;
+                com.google.gson.JsonElement latestEl = promos.get(MC_CHANNEL + "-latest");
+                if (latestEl == null) return;
+                String latest = latestEl.getAsString();
+                String current = net.fabricmc.loader.api.FabricLoader.getInstance()
+                        .getModContainer("gather")
+                        .map(c -> c.getMetadata().getVersion().getFriendlyString())
+                        .orElse("0.0.0");
+                if (isNewer(latest, comparableModVersion(current))) {
+                    updateAvailableVersion = latest;
+                    updateNotifStartMs = System.currentTimeMillis();
+                }
+            } catch (Exception ignored) {}
+        }, "gather-update-check");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static boolean isNewer(String a, String b) {
+        int[] pa = parseVer(a), pb = parseVer(b);
+        for (int i = 0; i < Math.max(pa.length, pb.length); i++) {
+            int va = i < pa.length ? pa[i] : 0;
+            int vb = i < pb.length ? pb[i] : 0;
+            if (va != vb) return va > vb;
+        }
+        return false;
+    }
+
+    public static String currentModVersion() {
+        String current = net.fabricmc.loader.api.FabricLoader.getInstance()
+                .getModContainer("gather")
+                .map(c -> c.getMetadata().getVersion().getFriendlyString())
+                .orElse("0.0.0");
+        return comparableModVersion(current);
+    }
+
+    private static String comparableModVersion(String version) {
+        int plus = version.indexOf('+');
+        if (plus >= 0 && plus + 1 < version.length()) {
+            return version.substring(plus + 1);
+        }
+        return version;
+    }
+
+    private static int[] parseVer(String v) {
+        String[] parts = v.split("[.\\-]");
+        int[] nums = new int[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            try { nums[i] = Integer.parseInt(parts[i]); } catch (NumberFormatException ignored) {}
+        }
+        return nums;
     }
 
 }

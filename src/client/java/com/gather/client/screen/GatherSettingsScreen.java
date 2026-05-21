@@ -144,7 +144,14 @@ public class GatherSettingsScreen extends Screen {
                     .bounds(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing, pbw, 20)
                     .build());
             addRenderableWidget(Button
-                    .builder(Component.literal("Theme: Modern"), btn -> {})
+                    .builder(stateText("Updates", GatherSettings.get().updateNotifications && !GatherSettings.get().suppressUpdateNotif), btn -> {
+                        GatherSettings settings = GatherSettings.get();
+                        boolean enabled = !(settings.updateNotifications && !settings.suppressUpdateNotif);
+                        settings.updateNotifications = enabled;
+                        settings.suppressUpdateNotif = !enabled;
+                        settings.save();
+                        btn.setMessage(stateText("Updates", enabled));
+                    })
                     .bounds(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing * 2, pbw, 20)
                     .build());
         } else {
@@ -168,7 +175,18 @@ public class GatherSettingsScreen extends Screen {
                     .build());
             addRenderableWidget(Button
                     .builder(Component.literal("Theme: Modern"), btn -> {})
-                    .bounds(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing, prefPanelWidth - panelPad * 2, 20)
+                    .bounds(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing, prefButtonW, 20)
+                    .build());
+            addRenderableWidget(Button
+                    .builder(stateText("Updates", GatherSettings.get().updateNotifications && !GatherSettings.get().suppressUpdateNotif), btn -> {
+                        GatherSettings settings = GatherSettings.get();
+                        boolean enabled = !(settings.updateNotifications && !settings.suppressUpdateNotif);
+                        settings.updateNotifications = enabled;
+                        settings.suppressUpdateNotif = !enabled;
+                        settings.save();
+                        btn.setMessage(stateText("Updates", enabled));
+                    })
+                    .bounds(prefColX + panelPad + prefButtonW + prefButtonGap, prefPanelY + cardFirstButtonY + bSpacing, prefButtonW, 20)
                     .build());
         }
 

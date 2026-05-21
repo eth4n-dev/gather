@@ -28,6 +28,7 @@ dependencies {
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
     compileOnly "com.terraformersmc:modmenu:18.0.0-beta.1"
+    compileOnly files("../libs/jei/jei-26.1.2-fabric-29.6.0.30.jar")
 }
 
 java {

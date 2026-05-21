@@ -1,30 +1,38 @@
 package com.gather.client.screen;
 
-import com.gather.client.GatherTheme;
+import com.gather.client.GatherHudLayout;
 import com.gather.client.GatherSettings;
+import com.gather.client.GatherTheme;
 import com.gather.client.GatherUi;
-import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.world.item.Items;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.Items;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class GatherLayoutEditorScreen extends Screen {
     private static final int HANDLE = 8;
-    private static final int SNAP   = 8;
+    private static final int SNAP = 8;
+    private static final int[] ZOOM_OPTIONS = {0, 2, 3, 4, 5};
 
     private final Screen parent;
     private final List<AABB> boxes = new ArrayList<>();
     private AABB active;
     private boolean resizing;
+    private boolean zoomDropdownOpen;
     private int grabX;
     private int grabY;
     private boolean showExtendedBorders = false;
     private final List<Integer> snapXLines = new ArrayList<>();
     private final List<Integer> snapYLines = new ArrayList<>();
+    private int canvasX;
+    private int canvasY;
+    private int canvasW;
+    private int canvasH;
+    private float canvasScale = 1.0f;
 
     public GatherLayoutEditorScreen(Screen parent) {
         super(Component.literal("Gather Layout"));
@@ -33,90 +41,135 @@ public class GatherLayoutEditorScreen extends Screen {
 
     @Override
     protected void init() {
+        GatherSettings s = GatherSettings.get();
+        if (s.layoutEditorZoom == 0) s.layoutEditorZoom = currentGuiScale();
+        applyEditorGuiScale(s.layoutEditorZoom);
+        loadSelectedZoomLayout();
         reloadBoxes();
+    }
+
+    private void loadSelectedZoomLayout() {
+        GatherSettings s = GatherSettings.get();
+        int zoom = selectedZoom();
+        updateCanvas();
+        s.applyHudLayoutForZoom(zoom, canvasW, canvasH);
     }
 
     private void reloadBoxes() {
         boxes.clear();
         GatherSettings s = GatherSettings.get();
-        boxes.add(new AABB("Goals / Lists",      0xFF66CCFF, s.layoutGoalsX,      s.layoutGoalsY,      s.layoutGoalsW,      120, 84,  false));
-        boxes.add(new AABB("Base Materials",     0xFFFFCC66, s.layoutMaterialsX,  s.layoutMaterialsY,  s.layoutMaterialsW,  100, 84,  true));
-        boxes.add(new AABB("Craft Hints",        0xFF88FF88, s.layoutCraftHintsX, s.layoutCraftHintsY, s.layoutCraftHintsW,  80, 84,  true));
-        int manualX = s.layoutManualScanX < 0 ? width / 2 - s.layoutManualScanW / 2 : s.layoutManualScanX;
-        boxes.add(new AABB("Manual Scan Banner", 0xFFFFAA44, manualX,             s.layoutManualScanY, s.layoutManualScanW,  38, 180, true));
-        int badgeX  = s.layoutScanBadgesX < 0 ? width - 4 - s.layoutScanBadgesW : s.layoutScanBadgesX;
-        boxes.add(new AABB("Scan Badges",        0xFF55DDBB, badgeX,              s.layoutScanBadgesY, s.layoutScanBadgesW,  26, 86,  true));
-        int finderX = s.layoutFinderX < 0 ? width - 4 - s.layoutFinderW : s.layoutFinderX;
-        boxes.add(new AABB("Find Item Panel",    0xFFFF6666, finderX,             s.layoutFinderY,     s.layoutFinderW,      38, 104, true));
-        int toastX  = s.layoutToastX < 0 ? width / 2 - 100 : s.layoutToastX;
-        boxes.add(new AABB("Goal Toast",         0xFF44FFAA, toastX,              s.layoutToastY,      200,                  14, 120, false));
+        updateCanvas();
+        GatherHudLayout.Resolved r = GatherHudLayout.resolve(s, canvasW, canvasH, GatherHudLayout.Metrics.defaults());
+        boxes.add(new AABB("Goals / Lists",      0xFF66CCFF, r.goals(),      GatherHudLayout.GOAL_CARD_W, true));
+        boxes.add(new AABB("Base Materials",     0xFFFFCC66, r.materials(),  GatherHudLayout.MAT_CARD_W,  true));
+        boxes.add(new AABB("Craft Hints",        0xFF88FF88, r.craftHints(), GatherHudLayout.HINT_COL_W,  true));
+        boxes.add(new AABB("Manual Scan Banner", 0xFFFFAA44, r.manualScan(), 180, false));
+        boxes.add(new AABB("Scan Badges",        0xFF55DDBB, r.scanBadges(), 86,  false));
+        boxes.add(new AABB("Find Item Panel",    0xFFFF6666, r.finder(),     104, false));
+        boxes.add(new AABB("Goal Toast",         0xFF44FFAA, r.toast(),      120, false));
     }
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor ctx, int mouseX, int mouseY, float delta) {
-        GatherTheme.fill(ctx, 0, 0, width, height, 0xCC050812);
+        GatherTheme.fill(ctx, 0, 0, width, height, 0x88050812);
         ctx.centeredText(font, title, width / 2, 8, 0xFFCCDDFF);
-        ctx.centeredText(font,
-                Component.literal("Drag modules. Resize with the lower-right handle."), width / 2, 20, 0xFF778899);
+        ctx.centeredText(font, Component.literal("Drag modules to reposition."), width / 2, 20, 0xFF778899);
+        updateCanvas();
 
-        // center guide lines — brighten while dragging
-        int lineAlpha = (active != null && !resizing) ? 0x55 : 0x22;
-        int lineColor = (lineAlpha << 24) | 0x44AAFF;
-        GatherTheme.fill(ctx, width / 2, 32, width / 2 + 1, height - 28, lineColor);
-        GatherTheme.fill(ctx, 4, height / 2, width - 4, height / 2 + 1, lineColor);
+        renderCanvasPreview(ctx, mouseX, mouseY);
 
-        // per-box extended border guide lines
-        if (showExtendedBorders) {
-            for (AABB box : boxes) {
-                int c = (box.color & 0x00FFFFFF) | 0x22000000;
-                GatherTheme.fill(ctx, box.x,           32,        box.x + 1,           height - 28, c);
-                GatherTheme.fill(ctx, box.x + box.w,   32,        box.x + box.w + 1,   height - 28, c);
-                GatherTheme.fill(ctx, 4, box.y,         width - 4, box.y + 1,                        c);
-                GatherTheme.fill(ctx, 4, box.y + box.h, width - 4, box.y + box.h + 1,               c);
-            }
-        }
-
-        // active snap highlight lines
-        for (int lx : snapXLines) GatherTheme.fill(ctx, lx, 32, lx + 1, height - 28, 0xAAFFDD33);
-        for (int ly : snapYLines) GatherTheme.fill(ctx, 4, ly, width - 4, ly + 1, 0xAAFFDD33);
-
-        for (int i = 0; i < boxes.size(); i++) drawBox(ctx, boxes.get(i), mouseX, mouseY, i);
-
-        // buttons: Show borders(84) | Reset(54) | Done(54) | Cancel(54) = 258px total
         int by = height - 24;
-        int bs = width / 2 - 129;
-        drawButton(ctx, bs,       by, 84, 18, "Show borders", mouseX, mouseY, showExtendedBorders);
-        drawButton(ctx, bs + 88,  by, 54, 18, "Reset",        mouseX, mouseY, false);
-        drawButton(ctx, bs + 146, by, 54, 18, "Done",         mouseX, mouseY, false);
-        drawButton(ctx, bs + 204, by, 54, 18, "Cancel",       mouseX, mouseY, false);
+        int bs = width / 2 - 163;
+        drawButton(ctx, bs,       by, 62, 18, zoomLabel(),     mouseX, mouseY, false);
+        drawButton(ctx, bs + 66,  by, 84, 18, "Show borders", mouseX, mouseY, showExtendedBorders);
+        drawButton(ctx, bs + 154, by, 54, 18, "Preset",       mouseX, mouseY, false);
+        drawButton(ctx, bs + 212, by, 54, 18, "Done",         mouseX, mouseY, false);
+        drawButton(ctx, bs + 270, by, 54, 18, "Cancel",       mouseX, mouseY, false);
+        if (zoomDropdownOpen) drawZoomDropdown(ctx, bs, by, mouseX, mouseY);
         super.extractRenderState(ctx, mouseX, mouseY, delta);
     }
 
-    private void drawBox(GuiGraphicsExtractor ctx, AABB box, int mx, int my, int idx) {
-        boolean hover = contains(box, mx, my);
-        int fill = hover || box == active ? 0x66335577 : 0x44223344;
-        GatherTheme.fill(ctx, box.x, box.y, box.x + box.w, box.y + box.h, fill);
-        GatherTheme.fill(ctx, box.x, box.y,             box.x + box.w, box.y + 1,        box.color);
-        GatherTheme.fill(ctx, box.x, box.y + box.h - 1, box.x + box.w, box.y + box.h,   box.color);
-        GatherTheme.fill(ctx, box.x, box.y,             box.x + 1,     box.y + box.h,   box.color);
-        GatherTheme.fill(ctx, box.x + box.w - 1, box.y, box.x + box.w, box.y + box.h,   box.color);
-        if (box.resizable)
-            GatherTheme.fill(ctx, box.x + box.w - HANDLE, box.y + box.h - HANDLE,
-                     box.x + box.w - 2,      box.y + box.h - 2, box.color);
+    private void drawZoomDropdown(GuiGraphicsExtractor ctx, int x, int buttonY, int mx, int my) {
+        int rowH = 16;
+        int w = 62;
+        int y = buttonY - ZOOM_OPTIONS.length * rowH - 2;
+        GatherTheme.fill(ctx, x, y, x + w, buttonY - 1, 0xEE0B1220);
+        for (int i = 0; i < ZOOM_OPTIONS.length; i++) {
+            int ry = y + i * rowH;
+            boolean hover = mx >= x && mx <= x + w && my >= ry && my <= ry + rowH;
+            boolean selected = ZOOM_OPTIONS[i] == GatherSettings.get().layoutEditorZoom;
+            int bg = selected ? 0xFF1A3320 : (hover ? 0xFF445577 : 0xFF18243A);
+            GatherTheme.fill(ctx, x + 1, ry, x + w - 1, ry + rowH - 1, bg);
+            String label = ZOOM_OPTIONS[i] <= 0 ? "Current" : ZOOM_OPTIONS[i] + "x";
+            ctx.text(font, Component.literal(label), x + 5, ry + 4, 0xFFCCDDFF);
+        }
+    }
 
-        ctx.enableScissor(box.x + 1, box.y + 1, box.x + box.w - 1, box.y + box.h - 1);
+    private void renderCanvasPreview(GuiGraphicsExtractor ctx, int mouseX, int mouseY) {
+        int lineAlpha = (active != null && !resizing) ? 0x55 : 0x22;
+        int lineColor = (lineAlpha << 24) | 0x44AAFF;
+        int cx = toScreenX(canvasW / 2);
+        int cy = toScreenY(canvasH / 2);
+        GatherTheme.fill(ctx, cx, canvasY, cx + 1, canvasY + screenH(canvasH), lineColor);
+        GatherTheme.fill(ctx, canvasX, cy, canvasX + screenW(canvasW), cy + 1, lineColor);
+
+        if (showExtendedBorders) {
+            for (AABB box : boxes) {
+                int c = (box.color & 0x00FFFFFF) | 0x22000000;
+                int sx = toScreenX(box.x);
+                int sy = toScreenY(box.y);
+                int ex = toScreenX(box.x + box.w);
+                int ey = toScreenY(box.y + box.h);
+                int mx = toScreenX(box.x + box.w / 2);
+                GatherTheme.fill(ctx, sx, canvasY, sx + 1, canvasY + screenH(canvasH), c);
+                GatherTheme.fill(ctx, ex, canvasY, ex + 1, canvasY + screenH(canvasH), c);
+                GatherTheme.fill(ctx, mx, canvasY, mx + 1, canvasY + screenH(canvasH), (box.color & 0x00FFFFFF) | 0x44000000);
+                GatherTheme.fill(ctx, canvasX, sy, canvasX + screenW(canvasW), sy + 1, c);
+                GatherTheme.fill(ctx, canvasX, ey, canvasX + screenW(canvasW), ey + 1, c);
+            }
+        }
+
+        for (int lx : snapXLines) GatherTheme.fill(ctx, toScreenX(lx), canvasY, toScreenX(lx) + 1, canvasY + screenH(canvasH), 0xAAFFDD33);
+        for (int ly : snapYLines) GatherTheme.fill(ctx, canvasX, toScreenY(ly), canvasX + screenW(canvasW), toScreenY(ly) + 1, 0xAAFFDD33);
+
+        for (int i = 0; i < boxes.size(); i++) drawBox(ctx, boxes.get(i), mouseX, mouseY, i);
+    }
+
+    private void drawBox(GuiGraphicsExtractor ctx, AABB box, int mx, int my, int idx) {
+        int cmx = toCanvasX(mx);
+        int cmy = toCanvasY(my);
+        boolean hover = contains(box, cmx, cmy);
+        int sx = toScreenX(box.x);
+        int sy = toScreenY(box.y);
+        int sw = screenW(box.w);
+        int sh = screenH(box.h);
+        int fill = hover || box == active ? 0x66335577 : 0x44223344;
+        GatherTheme.fill(ctx, sx, sy, sx + sw, sy + sh, fill);
+        GatherTheme.fill(ctx, sx, sy, sx + sw, sy + 1, box.color);
+        GatherTheme.fill(ctx, sx, sy + sh - 1, sx + sw, sy + sh, box.color);
+        GatherTheme.fill(ctx, sx, sy, sx + 1, sy + sh, box.color);
+        GatherTheme.fill(ctx, sx + sw - 1, sy, sx + sw, sy + sh, box.color);
+        if (box.resizable) {
+            GatherTheme.fill(ctx, sx + sw - HANDLE, sy + sh - HANDLE, sx + sw - 2, sy + sh - 2, box.color);
+        }
+
+        ctx.enableScissor(sx + 1, sy + 1, sx + sw - 1, sy + sh - 1);
+        var matrices = ctx.pose();
+        matrices.pushMatrix();
+        matrices.translate(sx, sy);
+        matrices.scale(canvasScale, canvasScale);
         drawBoxPreview(ctx, box, idx);
+        matrices.popMatrix();
         ctx.disableScissor();
     }
 
     private void drawBoxPreview(GuiGraphicsExtractor ctx, AABB box, int idx) {
-        int bx = box.x; int by = box.y; int bw = box.w; int bh = box.h;
+        int bx = 0; int by = 0; int bw = box.w; int bh = box.h;
         var tr = font;
         switch (idx) {
-            case 0 -> { // Goals / Lists
+            case 0 -> {
                 ctx.text(tr, Component.literal("§7My Goals"), bx + 2, by + 2, 0xFF778899);
                 int ry = by + 13;
-                // row: Diamond Sword, 1/2, 50% progress
                 GatherTheme.fill(ctx, bx, ry, bx + Math.min(80, bw), ry + 20, 0xAA00001A);
                 ctx.item(Items.DIAMOND_SWORD.getDefaultInstance(), bx + 1, ry + 2);
                 ctx.text(tr, Component.literal("Sword"), bx + 19, ry + 2, 0xFFCCCCCC);
@@ -125,7 +178,6 @@ public class GatherLayoutEditorScreen extends Screen {
                 GatherTheme.fill(ctx, bx, ry + 18, bx + Math.min(40, bw / 2), ry + 19, 0xFFFFDD33);
                 ry += 20;
                 if (ry + 20 <= by + bh - 2) {
-                    // row: Arrow, 16/16, full
                     GatherTheme.fill(ctx, bx, ry, bx + Math.min(80, bw), ry + 20, 0xAA002200);
                     ctx.item(Items.ARROW.getDefaultInstance(), bx + 1, ry + 2);
                     ctx.text(tr, Component.literal("Arrow"), bx + 19, ry + 2, 0xFFEEFFEE);
@@ -135,7 +187,6 @@ public class GatherLayoutEditorScreen extends Screen {
                     ry += 20;
                 }
                 if (ry + 20 <= by + bh - 2) {
-                    // row: Iron Ingot, 3/8
                     GatherTheme.fill(ctx, bx, ry, bx + Math.min(80, bw), ry + 20, 0xAA00001A);
                     ctx.item(Items.IRON_INGOT.getDefaultInstance(), bx + 1, ry + 2);
                     ctx.text(tr, Component.literal("Iron"), bx + 19, ry + 2, 0xFFCCCCCC);
@@ -144,10 +195,10 @@ public class GatherLayoutEditorScreen extends Screen {
                     GatherTheme.fill(ctx, bx, ry + 18, bx + Math.min(30, bw * 3 / 8), ry + 19, 0xFFFF8833);
                 }
             }
-            case 1 -> { // Base Materials
+            case 1 -> {
                 ctx.text(tr, Component.literal("§7base materials"), bx + 2, by + 2, 0xFF778899);
                 int ry = by + 13;
-                int[][]     matData  = {{4, 16, 0xFFFF6666}, {10, 16, 0xFFFFFF55}, {16, 16, 0xFF88FF88}};
+                int[][] matData = {{4, 16, 0xFFFF6666}, {10, 16, 0xFFFFFF55}, {16, 16, 0xFF88FF88}};
                 net.minecraft.world.item.Item[] matItems = {Items.OAK_LOG, Items.STICK, Items.IRON_INGOT};
                 for (int i = 0; i < 3 && ry + 16 <= by + bh - 2; i++) {
                     int have = matData[i][0], need = matData[i][1], col = matData[i][2];
@@ -161,12 +212,12 @@ public class GatherLayoutEditorScreen extends Screen {
                     ry += 16;
                 }
             }
-            case 2 -> { // Craft Hints
+            case 2 -> {
                 ctx.text(tr, Component.literal("§acraft ready"), bx + 2, by + 2, 0xFF66CC66);
                 int ry = by + 13;
                 if (ry + 18 <= by + bh - 2) {
                     GatherTheme.fill(ctx, bx, ry, bx + Math.min(80, bw), ry + 18, (0xAA << 24) | (0x22 << 8));
-                    ctx.item(Items.OAK_PLANKS.getDefaultInstance(), bx + 1,  ry + 1);
+                    ctx.item(Items.OAK_PLANKS.getDefaultInstance(), bx + 1, ry + 1);
                     ctx.item(Items.OAK_PLANKS.getDefaultInstance(), bx + 16, ry + 1);
                     ctx.text(tr, Component.literal("->"), bx + 33, ry + 5, 0xFF88CC88);
                     ctx.item(Items.CRAFTING_TABLE.getDefaultInstance(), bx + 44, ry + 1);
@@ -181,73 +232,99 @@ public class GatherLayoutEditorScreen extends Screen {
                     ctx.text(tr, Component.literal("x1"), bx + 62, ry + 5, 0xFF88FF88);
                 }
             }
-            case 3 -> { // Manual Scan Banner
+            case 3 -> {
                 GatherTheme.fill(ctx, bx + 1, by + 1, bx + bw - 1, by + bh - 1, 0xCC001A1A);
-                ctx.centeredText(tr, Component.literal("◎ MANUAL SCAN ACTIVE"), bx + bw / 2, by + 4,  0xFFFFCC44);
+                ctx.centeredText(tr, Component.literal("◎ MANUAL SCAN ACTIVE"), bx + bw / 2, by + 4, 0xFFFFCC44);
                 if (bh > 22) ctx.centeredText(tr, Component.literal("Right-click chests to tag"), bx + bw / 2, by + 15, 0xFFCCBB88);
                 if (bh > 32) ctx.centeredText(tr, Component.literal("2 chests tagged"), bx + bw / 2, by + 26, 0xFFFFDD99);
             }
-            case 4 -> { // Scan Badges
+            case 4 -> {
                 String badge = "• SCAN ALL (8)";
                 int badgeW = tr.width(badge) + 8;
                 int badgeX = bx + bw - 4 - badgeW;
                 GatherTheme.fill(ctx, badgeX, by + 2, badgeX + badgeW, by + 13, 0xAA00332B);
                 ctx.text(tr, Component.literal(badge), badgeX + 4, by + 4, 0xFF33D6AA);
             }
-            case 5 -> { // Find Item Panel
+            case 5 -> {
                 GatherTheme.fill(ctx, bx + 1, by + 1, bx + bw - 1, by + bh - 1, 0xCC1A0000);
                 ctx.item(Items.DIAMOND.getDefaultInstance(), bx + 2, by + 3);
-                ctx.text(tr, Component.literal("Diamond"),         bx + 22, by + 4,  0xFFFF9999);
+                ctx.text(tr, Component.literal("Diamond"), bx + 22, by + 4, 0xFFFF9999);
                 ctx.text(tr, Component.literal("x8  in 2 chests"), bx + 22, by + 15, 0xFFAA7744);
-                ctx.text(tr, Component.literal("24m"),             bx + 22, by + 26, 0xFFFF5533);
+                ctx.text(tr, Component.literal("24m"), bx + 22, by + 26, 0xFFFF5533);
             }
-            case 6 -> { // Goal Toast
-                String msg  = "✔  Diamond Sword";
-                int    tw   = tr.width(msg);
-                int    pw   = tw + 18;
-                int    px   = bx + (bw - pw) / 2;
+            case 6 -> {
+                String msg = "✔  Diamond Sword";
+                int tw = tr.width(msg);
+                int pw = tw + 18;
+                int px = bx + (bw - pw) / 2;
                 GatherTheme.fill(ctx, px, by, px + pw, by + 14, 0xFF001A00);
-                GatherTheme.fill(ctx, px, by, px + pw, by + 1,  0xFF33CC66);
+                GatherTheme.fill(ctx, px, by, px + pw, by + 1, 0xFF33CC66);
                 ctx.text(tr, Component.literal(msg), px + 9, by + 3, 0xFFAAFFCC);
             }
         }
     }
 
-    private void drawButton(GuiGraphicsExtractor ctx, int x, int y, int w, int h,
-                            String label, int mx, int my, boolean lit) {
+    private void drawButton(GuiGraphicsExtractor ctx, int x, int y, int w, int h, String label, int mx, int my, boolean lit) {
         boolean hov = mx >= x && mx <= x + w && my >= y && my <= y + h;
-        int bg     = lit ? 0xFF1A3320 : (hov ? 0xFF445577 : 0xFF24344F);
+        int bg = lit ? 0xFF1A3320 : (hov ? 0xFF445577 : 0xFF24344F);
         int border = lit ? 0xFF44AA55 : 0xFF667799;
         GatherTheme.fill(ctx, x, y, x + w, y + h, bg);
         GatherTheme.fill(ctx, x, y, x + w, y + 1, border);
-        ctx.text(font, Component.literal(label),
-                x + (w - font.width(label)) / 2, y + 5, 0xFFCCDDFF);
+        ctx.text(font, Component.literal(label), x + (w - font.width(label)) / 2, y + 5, 0xFFCCDDFF);
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent click, boolean focused) {
         int mx = (int) click.x();
         int my = (int) click.y();
+        if (zoomDropdownOpen) {
+            int bs = width / 2 - 163;
+            int rowH = 16;
+            int menuY = (height - 24) - ZOOM_OPTIONS.length * rowH - 2;
+            if (mx >= bs && mx <= bs + 62 && my >= menuY && my <= height - 26) {
+                GatherUi.playClickSound();
+                saveBoxes();
+                int idx = clamp((my - menuY) / rowH, 0, ZOOM_OPTIONS.length - 1);
+                GatherSettings s = GatherSettings.get();
+                s.layoutEditorZoom = ZOOM_OPTIONS[idx] <= 0 ? currentGuiScale() : ZOOM_OPTIONS[idx];
+                applyEditorGuiScale(s.layoutEditorZoom);
+                s.save();
+                loadSelectedZoomLayout();
+                reloadBoxes();
+                zoomDropdownOpen = false;
+                return true;
+            }
+            if (!(my >= height - 24 && my <= height - 6 && mx >= bs && mx <= bs + 62)) {
+                zoomDropdownOpen = false;
+            }
+        }
         if (my >= height - 24 && my <= height - 6) {
-            int bs = width / 2 - 129;
-            if (mx >= bs && mx <= bs + 84) {
+            int bs = width / 2 - 163;
+            if (mx >= bs && mx <= bs + 62) {
+                GatherUi.playClickSound();
+                saveBoxes();
+                zoomDropdownOpen = !zoomDropdownOpen;
+                return true;
+            }
+            if (mx >= bs + 66 && mx <= bs + 150) {
                 GatherUi.playClickSound();
                 showExtendedBorders = !showExtendedBorders;
                 return true;
             }
-            if (mx >= bs + 88 && mx <= bs + 142) {
+            if (mx >= bs + 154 && mx <= bs + 208) {
                 GatherUi.playClickSound();
-                GatherSettings.get().resetHudLayout();
+                updateCanvas();
+                GatherSettings.get().applyPresetForZoom(selectedZoom(), canvasW, canvasH);
                 reloadBoxes();
                 return true;
             }
-            if (mx >= bs + 146 && mx <= bs + 200) {
+            if (mx >= bs + 212 && mx <= bs + 266) {
                 GatherUi.playClickSound();
                 saveBoxes();
                 onClose();
                 return true;
             }
-            if (mx >= bs + 204 && mx <= bs + 258) {
+            if (mx >= bs + 270 && mx <= bs + 324) {
                 GatherUi.playClickSound();
                 onClose();
                 return true;
@@ -256,11 +333,13 @@ public class GatherLayoutEditorScreen extends Screen {
 
         for (int i = boxes.size() - 1; i >= 0; i--) {
             AABB box = boxes.get(i);
-            if (!contains(box, mx, my)) continue;
+            int cmx = toCanvasX(mx);
+            int cmy = toCanvasY(my);
+            if (!contains(box, cmx, cmy)) continue;
             active = box;
-            resizing = box.resizable && mx >= box.x + box.w - HANDLE && my >= box.y + box.h - HANDLE;
-            grabX = mx - box.x;
-            grabY = my - box.y;
+            resizing = box.resizable && cmx >= box.x + box.w - HANDLE && cmy >= box.y + box.h - HANDLE;
+            grabX = cmx - box.x;
+            grabY = cmy - box.y;
             return true;
         }
         return true;
@@ -269,13 +348,13 @@ public class GatherLayoutEditorScreen extends Screen {
     @Override
     public boolean mouseDragged(MouseButtonEvent click, double offsetX, double offsetY) {
         if (active == null) return false;
-        int mx = (int) click.x();
-        int my = (int) click.y();
+        int mx = toCanvasX((int) click.x());
+        int my = toCanvasY((int) click.y());
         if (resizing) {
             active.w = Math.max(active.minW, mx - active.x);
         } else {
-            active.x = clamp(mx - grabX, 0, Math.max(0, width - active.w));
-            active.y = clamp(my - grabY, 0, Math.max(0, height - active.h - 28));
+            active.x = clamp(mx - grabX, 0, Math.max(0, canvasW - active.w));
+            active.y = clamp(my - grabY, 0, Math.max(0, canvasH - active.h - 14));
             applySnap();
         }
         return true;
@@ -294,30 +373,32 @@ public class GatherLayoutEditorScreen extends Screen {
     private void applySnap() {
         snapXLines.clear();
         snapYLines.clear();
-        int scx = width  / 2;
-        int scy = height / 2;
+        int scx = canvasW / 2;
+        int scy = canvasH / 2;
 
         List<int[]> xCands = new ArrayList<>();
         xCands.add(new int[]{scx - active.w / 2, scx});
-        xCands.add(new int[]{scx,                 scx});
-        xCands.add(new int[]{scx - active.w,      scx});
+        xCands.add(new int[]{scx, scx});
+        xCands.add(new int[]{scx - active.w, scx});
         for (AABB other : boxes) {
             if (other == active) continue;
-            xCands.add(new int[]{other.x - active.w,           other.x});
-            xCands.add(new int[]{other.x + other.w,            other.x + other.w});
-            xCands.add(new int[]{other.x,                      other.x});
+            xCands.add(new int[]{other.x - active.w, other.x});
+            xCands.add(new int[]{other.x + other.w, other.x + other.w});
+            xCands.add(new int[]{other.x, other.x});
             xCands.add(new int[]{other.x + other.w - active.w, other.x + other.w});
+            int otherCenterX = other.x + other.w / 2;
+            xCands.add(new int[]{otherCenterX - active.w / 2, otherCenterX});
         }
 
         List<int[]> yCands = new ArrayList<>();
         yCands.add(new int[]{scy - active.h / 2, scy});
-        yCands.add(new int[]{scy,                 scy});
-        yCands.add(new int[]{scy - active.h,      scy});
+        yCands.add(new int[]{scy, scy});
+        yCands.add(new int[]{scy - active.h, scy});
         for (AABB other : boxes) {
             if (other == active) continue;
-            yCands.add(new int[]{other.y - active.h,           other.y});
-            yCands.add(new int[]{other.y + other.h,            other.y + other.h});
-            yCands.add(new int[]{other.y,                      other.y});
+            yCands.add(new int[]{other.y - active.h, other.y});
+            yCands.add(new int[]{other.y + other.h, other.y + other.h});
+            yCands.add(new int[]{other.y, other.y});
             yCands.add(new int[]{other.y + other.h - active.h, other.y + other.h});
         }
 
@@ -338,17 +419,74 @@ public class GatherLayoutEditorScreen extends Screen {
 
     private void saveBoxes() {
         GatherSettings s = GatherSettings.get();
-        AABB goals  = boxes.get(0); AABB mats   = boxes.get(1); AABB hints  = boxes.get(2);
+        AABB goals = boxes.get(0); AABB mats = boxes.get(1); AABB hints = boxes.get(2);
         AABB manual = boxes.get(3); AABB badges = boxes.get(4); AABB finder = boxes.get(5);
-        AABB toast  = boxes.get(6);
-        s.layoutGoalsX      = goals.x;  s.layoutGoalsY      = goals.y;  s.layoutGoalsW      = Math.max(goals.minW,  goals.w);
-        s.layoutMaterialsX  = mats.x;   s.layoutMaterialsY  = mats.y;   s.layoutMaterialsW  = Math.max(mats.minW,   mats.w);
-        s.layoutCraftHintsX = hints.x;  s.layoutCraftHintsY = hints.y;  s.layoutCraftHintsW = Math.max(hints.minW,  hints.w);
+        AABB toast = boxes.get(6);
+        s.layoutGoalsX = goals.x; s.layoutGoalsY = goals.y; s.layoutGoalsW = Math.max(goals.minW, goals.w);
+        s.layoutMaterialsX = mats.x; s.layoutMaterialsY = mats.y; s.layoutMaterialsW = Math.max(mats.minW, mats.w);
+        s.layoutCraftHintsX = hints.x; s.layoutCraftHintsY = hints.y; s.layoutCraftHintsW = Math.max(hints.minW, hints.w);
         s.layoutManualScanX = manual.x; s.layoutManualScanY = manual.y; s.layoutManualScanW = Math.max(manual.minW, manual.w);
         s.layoutScanBadgesX = badges.x; s.layoutScanBadgesY = badges.y; s.layoutScanBadgesW = Math.max(badges.minW, badges.w);
-        s.layoutFinderX     = finder.x; s.layoutFinderY     = finder.y; s.layoutFinderW     = Math.max(finder.minW, finder.w);
-        s.layoutToastX      = toast.x;  s.layoutToastY      = toast.y;
+        s.layoutFinderX = finder.x; s.layoutFinderY = finder.y; s.layoutFinderW = Math.max(finder.minW, finder.w);
+        s.layoutToastX = toast.x; s.layoutToastY = toast.y;
+        s.layoutBaseScreenW = canvasW;
+        s.layoutBaseScreenH = canvasH;
+        s.saveHudLayoutForZoom(selectedZoom());
         s.save();
+    }
+
+    private int selectedZoom() {
+        int zoom = GatherSettings.get().layoutEditorZoom;
+        return zoom <= 0 ? currentGuiScale() : zoom;
+    }
+
+    private int currentGuiScale() {
+        if (minecraft == null) return 0;
+        Integer value = minecraft.options.guiScale().get();
+        return value == null ? 0 : value;
+    }
+
+    private String zoomLabel() {
+        return "Zoom " + selectedZoom() + "x";
+    }
+
+    private void applyEditorGuiScale(int zoom) {
+        if (minecraft == null || zoom <= 0 || zoom == currentGuiScale()) return;
+        minecraft.options.guiScale().set(zoom);
+        minecraft.options.save();
+        minecraft.resizeGui();
+    }
+
+    private void updateCanvas() {
+        canvasX = 0;
+        canvasY = 0;
+        canvasW = width;
+        canvasH = height;
+        canvasScale = 1.0f;
+    }
+
+    private int toScreenX(int canvasValue) {
+        return canvasX + Math.round(canvasValue * canvasScale);
+    }
+
+    private int toScreenY(int canvasValue) {
+        return canvasY + Math.round(canvasValue * canvasScale);
+    }
+
+    private int toCanvasX(int screenValue) {
+        return Math.round((screenValue - canvasX) / Math.max(0.001f, canvasScale));
+    }
+
+    private int toCanvasY(int screenValue) {
+        return Math.round((screenValue - canvasY) / Math.max(0.001f, canvasScale));
+    }
+
+    private int screenW(int canvasValue) {
+        return Math.max(1, Math.round(canvasValue * canvasScale));
+    }
+
+    private int screenH(int canvasValue) {
+        return Math.max(1, Math.round(canvasValue * canvasScale));
     }
 
     private static boolean contains(AABB b, int x, int y) {
@@ -368,12 +506,26 @@ public class GatherLayoutEditorScreen extends Screen {
         final String label;
         final int color;
         final int minW;
+        final int minH;
         final boolean resizable;
+        final boolean dynamicHeight;
         int x, y, w, h;
 
-        AABB(String label, int color, int x, int y, int w, int h, int minW, boolean resizable) {
-            this.label = label; this.color = color; this.minW = minW; this.resizable = resizable;
-            this.x = x; this.y = y; this.w = Math.max(minW, w); this.h = h;
+        AABB(String label, int color, int x, int y, int w, int h, int minW, boolean resizable, boolean dynamicHeight) {
+            this.label = label;
+            this.color = color;
+            this.minW = minW;
+            this.minH = Math.min(h, 84);
+            this.resizable = resizable;
+            this.dynamicHeight = dynamicHeight;
+            this.x = x;
+            this.y = y;
+            this.w = Math.max(minW, w);
+            this.h = Math.max(minH, h);
+        }
+
+        AABB(String label, int color, GatherHudLayout.Rect rect, int minW, boolean dynamicHeight) {
+            this(label, color, rect.x(), rect.y(), rect.w(), rect.h(), minW, false, dynamicHeight);
         }
     }
 }

@@ -3,6 +3,7 @@ package com.gather.client;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
@@ -52,6 +53,7 @@ public class WorldHighlightRenderer {
     private static final long SCAN_INTERVAL_MS = 1500;
     private static final long VERTICAL_EXPAND_STABLE_MS = 3500;
     private static final long SECTION_CACHE_TTL_MS = 30_000;
+    private static final long EMPTY_SECTION_CACHE_TTL_MS = 3_000;
     private static final long SECTION_CACHE_PRUNE_INTERVAL_MS = 5_000;
     private static final int MIN_INITIAL_VERTICAL_SCAN_RADIUS = 10;
     private static final int VERTICAL_PRIORITY_WEIGHT = 3;
@@ -72,6 +74,7 @@ public class WorldHighlightRenderer {
     private static final int MANUAL_SCAN_XRAY_EDGE = 0xB0FFC800;
     private static final int FINDER_XRAY_FILL    = 0x50FF2020;
     private static final int FINDER_XRAY_EDGE    = 0xD0FF2020;
+    private static final int FINDER_FALLBACK_EDGE = 0xFFFF4444;
     private static final int COLLECTOR_XRAY_FILL = 0x28CC44FF;
     private static final int COLLECTOR_XRAY_EDGE = 0xB0CC44FF;
     private static final double COLLECTOR_LABEL_MAX_DISTANCE = 22.0;
@@ -90,6 +93,13 @@ public class WorldHighlightRenderer {
     private static Boolean cachedBlockXrayMode = null;
     private static ScanJob scanJob = null;
     private static final Map<SectionKey, SectionScanCache> sectionScanCache = new HashMap<>();
+    private static final Set<Block> TERRAIN_BLOCKS = Set.of(
+            Blocks.STONE, Blocks.COBBLESTONE, Blocks.DEEPSLATE, Blocks.COBBLED_DEEPSLATE,
+            Blocks.TUFF, Blocks.CALCITE, Blocks.GRANITE, Blocks.DIORITE, Blocks.ANDESITE,
+            Blocks.DIRT, Blocks.COARSE_DIRT, Blocks.GRASS_BLOCK, Blocks.PODZOL, Blocks.MYCELIUM,
+            Blocks.NETHERRACK, Blocks.BASALT, Blocks.BLACKSTONE, Blocks.END_STONE
+    );
+    private static final Map<Block, Boolean> terrainBlockCache = new HashMap<>();
     private static final Map<Long, ChestXrayCache> chestXrayCache = new HashMap<>();
     private static final Map<Long, VoxelShape> highlightShapeCache = new HashMap<>();
     private static final Map<Long, Long> shulkerAnimationWatchUntil = new HashMap<>();
@@ -142,6 +152,7 @@ public class WorldHighlightRenderer {
         lastSectionCachePruneMs = 0L;
         scanJob = null;
         sectionScanCache.clear();
+        terrainBlockCache.clear();
         chestXrayCache.clear();
         highlightShapeCache.clear();
         shulkerAnimationWatchUntil.clear();
@@ -201,8 +212,10 @@ public class WorldHighlightRenderer {
     }
 
     public static void captureWorldMatrices(Matrix4f positionMatrix, Matrix4f projectionMatrix) {
-        lastWorldPositionMatrix = new Matrix4f(positionMatrix);
-        lastWorldProjectionMatrix = new Matrix4f(projectionMatrix);
+        if (lastWorldPositionMatrix == null) lastWorldPositionMatrix = new Matrix4f(positionMatrix);
+        else lastWorldPositionMatrix.set(positionMatrix);
+        if (lastWorldProjectionMatrix == null) lastWorldProjectionMatrix = new Matrix4f(projectionMatrix);
+        else lastWorldProjectionMatrix.set(projectionMatrix);
     }
 
     public static void register() {
@@ -234,6 +247,9 @@ public class WorldHighlightRenderer {
         GatherState state = GatherState.get();
         Vec3 camPos = minecraft.getEntityRenderDispatcher().camera.position();
         PoseStack matrices = ctx.poseStack();
+        String finderItemId = state.getChestFinderItemId();
+        boolean suppressFinderOutlines = finderItemId != null && WhereIsItCompat.debugQuadsNoDepth() == null;
+        Set<Long> finderFallbackChests = suppressFinderOutlines ? state.getChestsContaining(finderItemId) : Collections.emptySet();
 
         // Needed block outlines (depth-tested LINES — skipped when blockXray is on, which uses no-depth quads)
         if (GatherSettings.get().highlightEnabled && !GatherSettings.get().blockXray && state.hasNeeded()) {
@@ -243,7 +259,7 @@ public class WorldHighlightRenderer {
         // Chest/collector depth-tested LINES outlines — always drawn; xray fill is separate via WorldRenderer TAIL
         GatherSettings settings = GatherSettings.get();
         if (settings.chestOutlinesEnabled || settings.collectorOutlinesEnabled) {
-            renderScannedContainerNormal(state, world, minecraft, camPos, consumers, matrices);
+            renderScannedContainerNormal(state, world, minecraft, camPos, consumers, matrices, finderFallbackChests);
         }
 
     }
@@ -256,11 +272,14 @@ public class WorldHighlightRenderer {
         if (!GatherSettings.get().enabled) return;
 
         RenderType xrayLayer = WhereIsItCompat.debugQuadsNoDepth();
-        if (xrayLayer == null) return;
-
         GatherState state = GatherState.get();
         GatherSettings settings = GatherSettings.get();
         String finderItemId = state.getChestFinderItemId();
+
+        if (xrayLayer == null) {
+            renderFinderFallbackOutlines(state, world, minecraft, settings);
+            return;
+        }
 
         net.minecraft.client.Camera camera = minecraft.getEntityRenderDispatcher().camera;
         MultiBufferSource.BufferSource consumers = minecraft.renderBuffers().bufferSource();
@@ -311,9 +330,49 @@ public class WorldHighlightRenderer {
         if (drew) consumers.endBatch(xrayLayer);
     }
 
+    private static void renderFinderFallbackOutlines(GatherState state, ClientLevel world,
+                                                     Minecraft minecraft, GatherSettings settings) {
+        String finderItemId = state.getChestFinderItemId();
+        if (finderItemId == null || minecraft.player == null) return;
+
+        Set<Long> finderChests = state.getChestsContaining(finderItemId);
+        if (finderChests.isEmpty()) return;
+
+        long now = System.currentTimeMillis();
+        if (chestDrawDirty || chestDrawList == null || now - chestDrawListBuiltAt > CHEST_DRAW_LIST_TTL_MS) {
+            rebuildChestDrawList(world, state, settings, now);
+        }
+
+        MultiBufferSource.BufferSource consumers = minecraft.renderBuffers().bufferSource();
+        VertexConsumer lines = consumers.getBuffer(RenderTypes.LINES);
+        PoseStack matrices = new PoseStack();
+        net.minecraft.client.Camera camera = minecraft.getEntityRenderDispatcher().camera;
+        matrices.mulPose(Axis.XP.rotationDegrees(camera.xRot()));
+        matrices.mulPose(Axis.YP.rotationDegrees(camera.yRot() - 180.0F));
+
+        Vec3 camPos = camera.position();
+        BlockPos playerPos = minecraft.player.blockPosition();
+        finderDrawn.clear();
+        boolean drew = false;
+
+        for (long encoded : finderChests) {
+            if (finderDrawn.contains(encoded)) continue;
+            BlockPos pos = BlockPos.of(encoded);
+            ChestXrayCache cache = getChestXrayCache(world, pos);
+            if (cache == null || !cache.valid()) continue;
+            if (isFarChestOutline(playerPos, pos)) continue;
+            markDoubleChestPartner(world, pos, finderDrawn);
+            drawFallbackContainerBox(lines, matrices, camPos, pos, shapeFromBounds(cache.bounds()), FINDER_FALLBACK_EDGE, 4.5f);
+            drew = true;
+        }
+
+        if (drew) consumers.endBatch(RenderTypes.LINES);
+    }
+
     private static void renderScannedContainerNormal(GatherState state, ClientLevel world,
                                                       Minecraft minecraft, Vec3 camPos,
-                                                      MultiBufferSource consumers, PoseStack matrices) {
+                                                      MultiBufferSource consumers, PoseStack matrices,
+                                                      Set<Long> suppressedFinderOutlines) {
         long now = System.currentTimeMillis();
         GatherSettings settings = GatherSettings.get();
         if (chestDrawDirty || chestDrawList == null || now - chestDrawListBuiltAt > CHEST_DRAW_LIST_TTL_MS) {
@@ -327,8 +386,9 @@ public class WorldHighlightRenderer {
         boolean drew = false;
         for (DrawSpec spec : chestDrawList) {
             if (spec.isCollector() && !collectorEnabled) continue;
+            if (!suppressedFinderOutlines.isEmpty() && suppressedFinderOutlines.contains(spec.pos().asLong())) continue;
             if (isFarChestOutline(playerPos, spec.pos())) continue;
-            drawFallbackContainerBox(lines, matrices, camPos, spec.pos(), spec.shape(), spec.edgeArgb());
+            drawFallbackContainerBox(lines, matrices, camPos, spec.pos(), spec.shape(), spec.edgeArgb(), 4.5f);
             drew = true;
         }
         if (drew && consumers instanceof MultiBufferSource.BufferSource immediate) {
@@ -353,7 +413,7 @@ public class WorldHighlightRenderer {
                 ? state.getManualChests() : Collections.emptySet();
 
         Set<Long> drawn = new HashSet<>();
-        List<Long> deadAuto = new ArrayList<>(), deadManual = new ArrayList<>();
+        List<Long> deadManual = new ArrayList<>();
         boolean hasAnimatingShulker = false;
         boolean hasPendingPlacedContainer = false;
         boolean hasUnresolvedCollectors = false;
@@ -365,7 +425,6 @@ public class WorldHighlightRenderer {
             if (cache == null) continue;
             if (!cache.valid()) {
                 if (isPendingPlacedContainer(encoded, now)) hasPendingPlacedContainer = true;
-                else deadAuto.add(encoded);
                 continue;
             }
             if (cache.animating()) hasAnimatingShulker = true;
@@ -414,7 +473,6 @@ public class WorldHighlightRenderer {
             }
         }
 
-        deadAuto.forEach(state::removeTrackedChest);
         deadManual.forEach(state::removeManualChest);
 
         chestDrawList = newList;
@@ -686,10 +744,10 @@ public class WorldHighlightRenderer {
     }
 
     private static void drawFallbackContainerBox(VertexConsumer lines, PoseStack matrices,
-                                                 Vec3 camPos, BlockPos pos, VoxelShape shape, int lineArgb) {
+                                                 Vec3 camPos, BlockPos pos, VoxelShape shape, int lineArgb, float width) {
         matrices.pushPose();
         matrices.translate(pos.getX() - camPos.x, pos.getY() - camPos.y, pos.getZ() - camPos.z);
-        ShapeRenderer.renderShape(matrices, lines, shape, 0.0, 0.0, 0.0, lineArgb, 2.5f);
+        ShapeRenderer.renderShape(matrices, lines, shape, 0.0, 0.0, 0.0, lineArgb, width);
         matrices.popPose();
     }
 
@@ -830,7 +888,6 @@ public class WorldHighlightRenderer {
         long now = System.currentTimeMillis();
         syncBlockXrayScanMode(false);
         updateScanJobForPlayer(playerPos, now, cachedHighlights == null);
-        pruneCachedHighlights(world, cachedNeededBlocks, true);
         processScanJob(world, cachedNeededBlocks);
 
         if (cachedHighlights == null || cachedHighlights.isEmpty()) return;
@@ -1053,7 +1110,7 @@ public class WorldHighlightRenderer {
             if (cached != null
                     && cached.neededHash() == scanJob.neededHash()
                     && cached.exposedOnly() == exposedOnly
-                    && now - cached.scannedAtMs() < SECTION_CACHE_TTL_MS) {
+                    && now - cached.scannedAtMs() < sectionCacheTtl(cached)) {
                 positions = cached.positions();
             } else {
                 positions = scanSection(world, section, neededBlocks, exposedOnly);
@@ -1062,7 +1119,10 @@ public class WorldHighlightRenderer {
             addPositionsInRadius(scanJob.highlights(), positions, scanJob.origin(),
                     scanJob.radius(), scanJob.verticalRadius(), scanJob.highlightSet());
         }
-        pruneCachedHighlights(world, neededBlocks, exposedOnly);
+        if (now - lastHighlightValidatedMs > HIGHLIGHT_VALIDATE_INTERVAL_MS) {
+            lastHighlightValidatedMs = now;
+            pruneCachedHighlights(world, neededBlocks, exposedOnly);
+        }
         applyHighlightLimit(world, scanJob.highlights(), scanJob.highlightSet(), scanJob.origin());
         cachedHighlights = scanJob.highlights();
         if (scanJob.pending().isEmpty()) scanJob = null;
@@ -1071,7 +1131,11 @@ public class WorldHighlightRenderer {
     private static void pruneSectionScanCache(long now) {
         if (now - lastSectionCachePruneMs < SECTION_CACHE_PRUNE_INTERVAL_MS) return;
         lastSectionCachePruneMs = now;
-        sectionScanCache.entrySet().removeIf(entry -> now - entry.getValue().scannedAtMs() >= SECTION_CACHE_TTL_MS);
+        sectionScanCache.entrySet().removeIf(entry -> now - entry.getValue().scannedAtMs() >= sectionCacheTtl(entry.getValue()));
+    }
+
+    private static long sectionCacheTtl(SectionScanCache cache) {
+        return cache.positions().isEmpty() ? EMPTY_SECTION_CACHE_TTL_MS : SECTION_CACHE_TTL_MS;
     }
 
     private static List<BlockPos> scanSection(ClientLevel world, SectionKey section,
@@ -1156,17 +1220,7 @@ public class WorldHighlightRenderer {
     }
 
     private static List<BlockPos> visibleHighlights(ClientLevel world) {
-        if (cachedHighlights == null || cachedHighlights.isEmpty()) return List.of();
-        if (GatherSettings.get().blockXray) return visibleHighlights();
-        int limit = currentVisibleHighlightLimit();
-        List<BlockPos> exposed = new ArrayList<>();
-        for (BlockPos pos : cachedHighlights) {
-            if (!isHiddenUnderground(world, pos)) {
-                exposed.add(pos);
-                if (exposed.size() >= limit) break;
-            }
-        }
-        return exposed;
+        return visibleHighlights();
     }
 
     private static boolean isHiddenUnderground(ClientLevel world, BlockPos pos) {
@@ -1187,26 +1241,9 @@ public class WorldHighlightRenderer {
     }
 
     private static boolean isTerrainBlock(Block block) {
-        String id = BuiltInRegistries.BLOCK.getKey(block).toString();
-        return id.equals("minecraft:stone")
-                || id.equals("minecraft:cobblestone")
-                || id.equals("minecraft:deepslate")
-                || id.equals("minecraft:cobbled_deepslate")
-                || id.equals("minecraft:tuff")
-                || id.equals("minecraft:calcite")
-                || id.equals("minecraft:granite")
-                || id.equals("minecraft:diorite")
-                || id.equals("minecraft:andesite")
-                || id.equals("minecraft:dirt")
-                || id.equals("minecraft:coarse_dirt")
-                || id.equals("minecraft:grass_block")
-                || id.equals("minecraft:podzol")
-                || id.equals("minecraft:mycelium")
-                || id.equals("minecraft:netherrack")
-                || id.equals("minecraft:basalt")
-                || id.equals("minecraft:blackstone")
-                || id.equals("minecraft:end_stone")
-                || id.contains("_ore");
+        if (TERRAIN_BLOCKS.contains(block)) return true;
+        return terrainBlockCache.computeIfAbsent(block,
+                b -> BuiltInRegistries.BLOCK.getKey(b).getPath().contains("_ore"));
     }
 
     private static boolean isSnowExposureBlock(BlockState state) {

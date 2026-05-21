@@ -17,6 +17,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -34,11 +35,13 @@ public class GatherHud {
     private static final long TOAST_TOTAL_MS   = TOAST_FADEIN_MS + TOAST_HOLD_MS + TOAST_FADEOUT_MS;
     private static final int  MAX_TOASTS       = 4;
 
-    private static final int ROW_H_GOAL = 22; // goal rows (two text lines + progress bar)
-    private static final int ROW_H_MAT  = 18; // material rows
-    private static final int ROW_H_HINT = 20; // craft-hint rows
-    private static final int LABEL_H    = 11;
+    private static final int ROW_H_GOAL = GatherHudLayout.GOAL_ROW_H; // goal rows (two text lines + progress bar)
+    private static final int ROW_H_MAT  = GatherHudLayout.MAT_ROW_H; // material rows
+    private static final int ROW_H_HINT = GatherHudLayout.HINT_ROW_H; // craft-hint rows
+    private static final int LABEL_H    = GatherHudLayout.LABEL_H;
     private static final int SEP_H      = 5;
+    private static final int GOAL_CARD_W = GatherHudLayout.GOAL_CARD_W;
+    private static final int MAT_CARD_W = GatherHudLayout.MAT_CARD_W;
 
     // long[4] = { firstSeenMs, lastActiveMs, rawNeeded, completionStartMs }
     // completionStartMs == 0 → not yet completing.
@@ -49,6 +52,17 @@ public class GatherHud {
     private static HudModel cachedModel = HudModel.empty();
     private static long cachedModelAtMs = 0L;
     private static boolean modelDirty = true;
+    private static int goalPage = 0;
+    private static int matPage = 0;
+    private static int lastGoalPageCount = 1;
+    private static int lastMatPageCount = 1;
+    private static boolean goalPageLeftDown = false;
+    private static boolean goalPageRightDown = false;
+    private static boolean matPageLeftDown = false;
+    private static boolean matPageRightDown = false;
+    private static int lastAppliedLayoutGuiScale = Integer.MIN_VALUE;
+    private static int lastAppliedLayoutScreenW = Integer.MIN_VALUE;
+    private static int lastAppliedLayoutScreenH = Integer.MIN_VALUE;
 
     // Goal completion sound + toast
     private record ToastEntry(String itemName, long startMs) {}
@@ -64,6 +78,7 @@ public class GatherHud {
     private record MatEntry(String itemId, ItemStack stack, int rawNeeded, int have, long firstSeenMs, long completionStartMs) {}
     private record HintEntry(String rootId, ItemStack rootStack, int craftable, int needed, List<ItemStack> leafStacks) {}
     private record GoalEntry(int listIndex, GatherState.RootInfo root, ItemStack stack, String itemName, boolean header) {}
+    private record GoalPage(int listIndex, int startEntry, int endEntry, int part, int parts) {}
     private record HudModel(List<GatherList> lists, List<GoalEntry> goalEntries,
                             List<MatEntry> matEntries, List<HintEntry> hints) {
         static HudModel empty() {
@@ -79,6 +94,18 @@ public class GatherHud {
         modelDirty = true;
         inventoryCountCache.clear();
         inventorySnapshot = null;
+        resetPages();
+    }
+
+    private static void resetPages() {
+        goalPage = 0;
+        matPage = 0;
+        lastGoalPageCount = 1;
+        lastMatPageCount = 1;
+        goalPageLeftDown = false;
+        goalPageRightDown = false;
+        matPageLeftDown = false;
+        matPageRightDown = false;
     }
 
     public static boolean isCollectorShulker(ItemStack stack) {
@@ -96,6 +123,53 @@ public class GatherHud {
         modelDirty = true;
         inventoryCountCache.clear();
         inventorySnapshot = null;
+        resetPages();
+    }
+
+    public static void handlePageKeys(Minecraft minecraft) {
+        if (minecraft.player == null || minecraft.screen != null) {
+            goalPageLeftDown = false;
+            goalPageRightDown = false;
+            matPageLeftDown = false;
+            matPageRightDown = false;
+            return;
+        }
+        long handle = minecraft.getWindow().handle();
+        boolean alt = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_ALT) == GLFW.GLFW_PRESS
+                || GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_ALT) == GLFW.GLFW_PRESS;
+        boolean ctrl = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS
+                || GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
+        boolean leftArrow = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT) == GLFW.GLFW_PRESS;
+        boolean rightArrow = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT) == GLFW.GLFW_PRESS;
+
+        boolean goalLeftDown = alt && leftArrow;
+        boolean goalRightDown = alt && rightArrow;
+        boolean matLeftDown = ctrl && leftArrow;
+        boolean matRightDown = ctrl && rightArrow;
+
+        if (goalLeftDown && !goalPageLeftDown) changeGoalPage(-1);
+        if (goalRightDown && !goalPageRightDown) changeGoalPage(1);
+        if (matLeftDown && !matPageLeftDown) changeMatPage(-1);
+        if (matRightDown && !matPageRightDown) changeMatPage(1);
+
+        goalPageLeftDown = goalLeftDown;
+        goalPageRightDown = goalRightDown;
+        matPageLeftDown = matLeftDown;
+        matPageRightDown = matRightDown;
+    }
+
+    private static void changeGoalPage(int delta) {
+        if (lastGoalPageCount > 1) goalPage = clamp(goalPage + delta, 0, lastGoalPageCount - 1);
+    }
+
+    private static void changeMatPage(int delta) {
+        if (lastMatPageCount > 1) matPage = clamp(matPage + delta, 0, lastMatPageCount - 1);
+    }
+
+    public static void showToast(String message) {
+        if (message == null || message.isBlank()) return;
+        if (toastQueue.size() >= MAX_TOASTS) toastQueue.remove(0);
+        toastQueue.add(new ToastEntry(message, System.currentTimeMillis()));
     }
 
     private static void onHudRender(GuiGraphicsExtractor context, net.minecraft.client.DeltaTracker tickCounter) {
@@ -128,48 +202,68 @@ public class GatherHud {
         int screenH  = minecraft.getWindow().getGuiScaledHeight();
         int screenW  = minecraft.getWindow().getGuiScaledWidth();
         GatherSettings settings = GatherSettings.get();
-        int topY = Math.max(0, settings.layoutGoalsY);
-        int maxContentH = Math.max(ROW_H_GOAL, screenH - topY - 12);
-        int colW = Math.max(84, settings.layoutGoalsW);
-        int rowStartY = topY + LABEL_H;
-        int rowContentH = Math.max(ROW_H_GOAL, maxContentH - LABEL_H);
-
-        int goalCols = 0;
-        int colH = 0;
-        for (GoalEntry entry : goalEntries) {
-            int h = entry.header() ? LABEL_H : ROW_H_GOAL;
-            if (colH > 0 && colH + h > maxContentH) {
-                goalCols++;
-                colH = 0;
-            }
-            colH += h;
+        int currentGuiScale = currentGuiScale(minecraft);
+        if (currentGuiScale != lastAppliedLayoutGuiScale
+                || screenW != lastAppliedLayoutScreenW
+                || screenH != lastAppliedLayoutScreenH) {
+            settings.applyHudLayoutForZoom(currentGuiScale, screenW, screenH);
+            lastAppliedLayoutGuiScale = currentGuiScale;
+            lastAppliedLayoutScreenW = screenW;
+            lastAppliedLayoutScreenH = screenH;
         }
-        if (!goalEntries.isEmpty()) goalCols++;
+        ensureLayoutBaseSize(settings, screenW, screenH);
 
-        int maxCols = Math.max(1, (screenW - 8) / colW);
-        boolean hasMats = !matEntries.isEmpty();
-        boolean hasHints = !hints.isEmpty();
-        int reservedCols = (hasMats ? 1 : 0) + (hasHints ? 1 : 0);
-        int maxGoalCols = Math.max(1, maxCols - reservedCols);
-        if (goalCols > maxGoalCols) goalCols = maxGoalCols;
+        boolean countChests = GatherSettings.get().countChests;
+        boolean manualScanOn = !countChests && state.isChestScanMode();
+        boolean scanAllOn    = countChests;
+        String line1 = "◎ MANUAL SCAN ACTIVE";
+        String line2 = "Right-click chests to tag / untag";
+        int manualCount = state.getManualChests().size();
+        String line3 = manualCount == 0 ? "No chests tagged yet"
+                : manualCount + " chest" + (manualCount == 1 ? "" : "s") + " tagged · Contents count toward goals";
+        int manualW = Math.max(196, Math.max(minecraft.font.width(line1),
+                Math.max(minecraft.font.width(line2), minecraft.font.width(line3))) + 12);
+        String finderItemIdForLayout = state.getChestFinderItemId();
+        int finderWForLayout = 120;
+        if (finderItemIdForLayout != null) {
+            Item finderItemForLayout = ITEM_ID_CACHE.computeIfAbsent(finderItemIdForLayout, k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
+            String finderName = finderItemForLayout != null ? com.gather.client.GatherUi.itemName(finderItemForLayout).getString() : finderItemIdForLayout;
+            int finderTextW = Math.max(minecraft.font.width(minecraft.font.plainSubstrByWidth(finderName, 90)),
+                    Math.max(minecraft.font.width("x99  in 99 chests"), minecraft.font.width("not in scanned chests")));
+            finderWForLayout = Math.max(120, 20 + finderTextW + 12);
+        }
+        GatherHudLayout.Resolved layout = GatherHudLayout.resolve(settings, screenW, screenH,
+                new GatherHudLayout.Metrics(manualW, finderWForLayout, 200));
 
-        int matTopY = Math.max(0, settings.layoutMaterialsY);
-        int matStartX = Math.max(0, settings.layoutMaterialsX);
-        int matColW = Math.max(84, settings.layoutMaterialsW);
+        int topY = layout.goals().y();
+        int maxContentH = Math.max(ROW_H_GOAL, screenH - topY - 12);
+        List<GoalPage> goalPages = buildGoalPages(goalEntries, maxContentH);
+        int goalPageCount = goalPages.isEmpty() ? 1 : goalPages.size();
+        if (goalPageCount > 1) {
+            maxContentH = Math.max(ROW_H_GOAL, maxContentH - 12);
+            goalPages = buildGoalPages(goalEntries, maxContentH);
+            goalPageCount = goalPages.isEmpty() ? 1 : goalPages.size();
+        }
+        lastGoalPageCount = goalPageCount;
+        goalPage = clamp(goalPage, 0, goalPageCount - 1);
+
+        int matTopY = layout.materials().y();
+        int matStartX = layout.materials().x();
         int matRowStartY = matTopY + LABEL_H;
         int matContentH = Math.max(ROW_H_MAT, screenH - matTopY - 12 - LABEL_H);
-        int matRowsPerCol = Math.max(1, matContentH / ROW_H_MAT);
-        int maxMatCols = Math.max(1, (screenW - matStartX - 4) / matColW);
-        int numCols  = matEntries.isEmpty() ? 0
-                : (int) Math.ceil((double) matEntries.size() / matRowsPerCol);
-        if (numCols > maxMatCols) {
-            numCols = maxMatCols;
-            matRowsPerCol = (int) Math.ceil((double) matEntries.size() / numCols);
+        int matRowsPerPage = Math.max(1, matContentH / ROW_H_MAT);
+        int matPageCount = matEntries.isEmpty() ? 1 : (int) Math.ceil((double) matEntries.size() / matRowsPerPage);
+        if (matPageCount > 1) {
+            matContentH = Math.max(ROW_H_MAT, matContentH - 12);
+            matRowsPerPage = Math.max(1, matContentH / ROW_H_MAT);
+            matPageCount = matEntries.isEmpty() ? 1 : (int) Math.ceil((double) matEntries.size() / matRowsPerPage);
         }
+        lastMatPageCount = matPageCount;
+        matPage = clamp(matPage, 0, matPageCount - 1);
 
-        int hintTopY = Math.max(0, settings.layoutCraftHintsY);
-        int hintStartX = Math.max(0, settings.layoutCraftHintsX);
-        int hintColW = Math.max(84, settings.layoutCraftHintsW);
+        int hintTopY = layout.craftHints().y();
+        int hintStartX = layout.craftHints().x();
+        int hintColW = GatherHudLayout.HINT_COL_W;
         int hintRowStartY = hintTopY + LABEL_H;
         int hintContentH = Math.max(ROW_H_HINT, screenH - hintTopY - 12 - LABEL_H);
         int hintRowsPerCol = Math.max(1, hintContentH / ROW_H_HINT);
@@ -180,25 +274,14 @@ public class GatherHud {
             hintRowsPerCol = (int) Math.ceil((double) hints.size() / hintCols);
         }
 
-        // === SCAN MODE INDICATORS ===
-        boolean countChests = GatherSettings.get().countChests;
-        boolean manualScanOn = !countChests && state.isChestScanMode();
-        boolean scanAllOn    = countChests;
         int sw = screenW;
 
         if (manualScanOn) {
             // Centre-top banner while manual mode is active
-            int manualCount = state.getManualChests().size();
-            String line1 = "◎ MANUAL SCAN ACTIVE";
-            String line2 = "Right-click chests to tag / untag";
-            String line3 = manualCount == 0 ? "No chests tagged yet"
-                    : manualCount + " chest" + (manualCount == 1 ? "" : "s") + " tagged · Contents count toward goals";
-            int minBw = Math.max(minecraft.font.width(line1),
-                     Math.max(minecraft.font.width(line2), minecraft.font.width(line3))) + 12;
-            int bw = Math.max(minBw, settings.layoutManualScanW);
-            int bh = 38;
-            int bx = settings.layoutManualScanX < 0 ? sw / 2 - bw / 2 : settings.layoutManualScanX;
-            int by = settings.layoutManualScanY;
+            int bw = layout.manualScan().w();
+            int bh = layout.manualScan().h();
+            int bx = layout.manualScan().x();
+            int by = layout.manualScan().y();
             int textCenterX = bx + bw / 2;
             GatherTheme.drawNineSlice(context, GatherTheme.HUD_MANUAL_SCAN_PANEL, bx, by, bw, bh);
             context.centeredText(minecraft.font, Component.literal(line1), textCenterX, by + 4, 0xFFFFCC44);
@@ -208,8 +291,8 @@ public class GatherHud {
 
         // Small top-right badge for persistent scan modes
         {
-            int badgeX = settings.layoutScanBadgesX < 0 ? sw - 4 : settings.layoutScanBadgesX + settings.layoutScanBadgesW;
-            int badgeY = settings.layoutScanBadgesY;
+            int badgeX = settings.layoutScanBadgesX < 0 ? sw - 4 : layout.scanBadges().x() + layout.scanBadges().w();
+            int badgeY = layout.scanBadges().y();
             if (scanAllOn) {
                 int autoCount = state.getTrackedChests().size();
                 String badge = "• SCAN ALL" + (autoCount > 0 ? " (" + autoCount + ")" : "");
@@ -255,7 +338,7 @@ public class GatherHud {
                 String distStr = "";
                 if (nearest != null) {
                     int dist = (int) Math.sqrt(nearestDistSq);
-                    distStr = dist + "m";
+                    distStr = Math.max(0, dist - 1) + "m";
                     double dx = nearest.getX() - playerPos.getX();
                     double dz = nearest.getZ() - playerPos.getZ();
                     double chestYaw = Math.toDegrees(Math.atan2(-dx, dz));
@@ -280,10 +363,10 @@ public class GatherHud {
                 int textW  = Math.max(minecraft.font.width(dispName),
                              Math.max(minecraft.font.width(navLine),
                                       minecraft.font.width(cntLine)));
-                int panelW = Math.max(settings.layoutFinderW, iconW + textW + 12);
-                int panelX = settings.layoutFinderX < 0 ? sw - 4 - panelW : settings.layoutFinderX;
-                int panelY = settings.layoutFinderY;
-                int panelH = 38;
+                int panelW = Math.max(layout.finder().w(), iconW + textW + 12);
+                int panelX = settings.layoutFinderX < 0 ? sw - 4 - panelW : clampToScreenX(layout.finder().x(), panelW, screenW);
+                int panelY = layout.finder().y();
+                int panelH = layout.finder().h();
 
                 GatherTheme.drawNineSlice(context, GatherTheme.HUD_FINDER_PANEL, panelX, panelY, panelW, panelH);
 
@@ -329,8 +412,7 @@ public class GatherHud {
         // === COMPLETION TOASTS ===
         toastQueue.removeIf(t -> now - t.startMs() > TOAST_TOTAL_MS);
         if (!toastQueue.isEmpty()) {
-            int sw2 = minecraft.getWindow().getGuiScaledWidth();
-            int toastCenterX = settings.layoutToastX < 0 ? sw2 / 2 : settings.layoutToastX + 100;
+            int toastCenterX = layout.toast().x() + layout.toast().w() / 2;
             for (int ti = toastQueue.size() - 1; ti >= 0; ti--) {
                 ToastEntry toast = toastQueue.get(ti);
                 long elapsed = now - toast.startMs();
@@ -344,7 +426,7 @@ public class GatherHud {
                 int tw2 = minecraft.font.width(msg);
                 int pw = tw2 + 18;
                 int px = toastCenterX - pw / 2;
-                int py = settings.layoutToastY + (toastQueue.size() - 1 - ti) * 18;
+                int py = layout.toast().y() + (toastQueue.size() - 1 - ti) * 18;
                 GatherTheme.drawNineSliceTint(context, GatherTheme.HUD_TOAST_PANEL, px, py, pw, 14, (a << 24) | 0xFFFFFF);
                 context.text(minecraft.font, Component.literal(msg), px + 9, py + 3, (a << 24) | 0xAAFFCC);
             }
@@ -352,31 +434,23 @@ public class GatherHud {
 
         if (goalEntries.isEmpty() && matEntries.isEmpty() && hints.isEmpty()) return;
 
-        int x = Math.max(0, settings.layoutGoalsX);
+        int x = layout.goals().x();
         int y = topY;
-        int goalCol = 0;
-        int hiddenGoalRows = 0;
 
-        // === RENDER GOAL ROWS (multi-column) ===
-        for (int gi = 0; gi < goalEntries.size(); gi++) {
-            GoalEntry entry = goalEntries.get(gi);
-            int entryH = entry.header() ? LABEL_H : ROW_H_GOAL;
-            if (y > topY && y + entryH > topY + maxContentH) {
-                goalCol++;
-                if (goalCol >= goalCols) {
-                    hiddenGoalRows = goalEntries.size() - gi;
-                    break;
-                }
-                x = Math.max(0, settings.layoutGoalsX) + goalCol * colW;
-                y = topY;
-            }
-
-            if (entry.header()) {
+        // === RENDER GOAL ROWS (paged by list) ===
+        if (!goalEntries.isEmpty() && !goalPages.isEmpty()) {
+            GoalPage page = goalPages.get(goalPage);
+            String title = lists.get(page.listIndex()).name;
+            if (page.parts() > 1) title += " " + page.part() + "/" + page.parts();
+            title = trimToWidth(minecraft, title, GOAL_CARD_W - 4);
                 context.text(minecraft.font,
-                        Component.literal("§7" + lists.get(entry.listIndex()).name), x + 2, y + 2, 0xFF778899);
-                y += LABEL_H;
-                continue;
-            }
+                        Component.literal("§7" + title), x + 2, y + 2, 0xFF778899);
+            y += LABEL_H;
+
+            for (int gi = page.startEntry(); gi < page.endEntry(); gi++) {
+            GoalEntry entry = goalEntries.get(gi);
+            if (entry.header()) continue;
+            if (y > topY && y + ROW_H_GOAL > topY + maxContentH) break;
 
             GatherState.RootInfo root = entry.root();
             ItemStack stack = entry.stack();
@@ -387,7 +461,7 @@ public class GatherHud {
             boolean ready = root.ready();
 
             GatherTheme.drawNineSlice(context, ready ? GatherTheme.HUD_GOAL_ROW_READY : GatherTheme.HUD_GOAL_ROW,
-                    x, y, 80, ROW_H_GOAL - 2);
+                    x, y, GOAL_CARD_W, ROW_H_GOAL - 2);
             context.item(stack, x + 1, y + 2);
 
             String haveBadge;
@@ -401,9 +475,9 @@ public class GatherHud {
             }
             int haveBadgeW = minecraft.font.width(haveBadge);
             context.text(minecraft.font,
-                    Component.literal(haveBadge), x + 78 - haveBadgeW, y + 2, haveBadgeCol);
+                    Component.literal(haveBadge), x + GOAL_CARD_W - 2 - haveBadgeW, y + 2, haveBadgeCol);
 
-            int nameMaxW = 78 - 19 - haveBadgeW - 3;
+            int nameMaxW = GOAL_CARD_W - 2 - 19 - haveBadgeW - 3;
             String fullName = entry.itemName();
             String name;
             if (minecraft.font.width(fullName) > nameMaxW) {
@@ -421,35 +495,29 @@ public class GatherHud {
                 int craftCol = cnt >= needed ? 0xFF55FF55 : (cnt > 0 ? 0xFFFFDD33 : 0xFF666666);
                 int craftW = minecraft.font.width(craftLabel);
                 context.text(minecraft.font,
-                        Component.literal(craftLabel), x + 78 - craftW, y + 11, craftCol);
+                        Component.literal(craftLabel), x + GOAL_CARD_W - 2 - craftW, y + 11, craftCol);
             }
 
             float prog = root.leafProgress();
-            int lineW = (int)(80 * prog);
+            int lineW = (int)(GOAL_CARD_W * prog);
             int barCol = prog >= 1f ? 0x44DD66 : (prog > 0.5f ? 0xFFDD33 : (prog > 0f ? 0xFF8833 : 0x664444));
-            GatherTheme.drawStretch(context, GatherTheme.HUD_PROGRESS_TRACK, x, y + ROW_H_GOAL - 2, 80, 1);
+            GatherTheme.drawStretch(context, GatherTheme.HUD_PROGRESS_TRACK, x, y + ROW_H_GOAL - 2, GOAL_CARD_W, 1);
             if (lineW > 0)
                 GatherTheme.drawStretch(context, progressFillTexture(prog), x, y + ROW_H_GOAL - 2, lineW, 1);
 
             y += ROW_H_GOAL;
-        }
-        if (hiddenGoalRows > 0) {
-            int ox = Math.max(0, settings.layoutGoalsX) + (goalCols - 1) * colW;
-            int oy = topY + maxContentH - 11;
-            String more = "+" + hiddenGoalRows + " more";
-            GatherTheme.drawNineSlice(context, GatherTheme.HUD_MORE_ROW, ox, oy, 80, 10);
-            context.text(minecraft.font, Component.literal(more), ox + 2, oy + 1, 0xFFFFAA44);
+            }
         }
 
-        // === RENDER BASE MATERIAL ROWS (multi-column) ===
+        // === RENDER BASE MATERIAL ROWS (paged) ===
         if (!matEntries.isEmpty()) {
             context.text(minecraft.font,
                     Component.literal("§7base materials"), matStartX + 2, matTopY + 2, 0xFF778899);
         }
-        for (int mi = 0; mi < matEntries.size(); mi++) {
-            int col = numCols > 0 ? mi / matRowsPerCol : 0;
-            int row = numCols > 0 ? mi % matRowsPerCol : mi;
-            if (col >= numCols) break;
+        int matStart = matPage * matRowsPerPage;
+        int matEnd = Math.min(matEntries.size(), matStart + matRowsPerPage);
+        for (int mi = matStart; mi < matEnd; mi++) {
+            int row = mi - matStart;
             MatEntry entry = matEntries.get(mi);
             ItemStack stack = entry.stack();
             if (stack.isEmpty()) continue;
@@ -459,7 +527,7 @@ public class GatherHud {
             boolean completing = entry.completionStartMs() != 0;
             float alpha = materialAlpha(entry, now);
             int a    = Math.max(0, Math.min(255, (int)(alpha * 255)));
-            int rx   = matStartX + col * matColW + materialXShift(entry, now);
+            int rx   = matStartX + materialXShift(entry, now);
             int ry   = matRowStartY + row * ROW_H_MAT;
 
             GatherTheme.drawStretchTint(context, GatherTheme.HUD_MATERIAL_ACCENT,
@@ -483,7 +551,7 @@ public class GatherHud {
                 int bgAlpha = (int)(alpha * 0x88);
                 GatherTheme.drawNineSliceTint(context, GatherTheme.HUD_TINT_ROW,
                         rx, ry, 80, ROW_H_MAT - 2, (bgAlpha << 24) | bgBase);
-                context.item(stack, rx + 1, ry);
+                    context.item(stack, rx + 1, ry);
                 if (alpha < 1f) {
                     int maskA = (int)((1f - alpha) * 230);
                     GatherTheme.drawTint(context, GatherTheme.HUD_ITEM_FADE_MASK, rx + 1, ry, maskA << 24);
@@ -500,6 +568,12 @@ public class GatherHud {
                     GatherTheme.drawStretchTint(context, progressFillTexture(progress),
                             rx, ry + ROW_H_MAT - 2, lineW, 1, (lineAlpha << 24) | 0xFFFFFF);
             }
+        }
+        if (goalPageCount > 1) {
+            drawColumnPageHint(context, minecraft, layout.goals().x(), topY + maxContentH, GOAL_CARD_W, "Alt+←/→  Goals " + (goalPage + 1) + "/" + goalPageCount, screenH);
+        }
+        if (matPageCount > 1) {
+            drawColumnPageHint(context, minecraft, matStartX, matRowStartY + matRowsPerPage * ROW_H_MAT, MAT_CARD_W, "Ctrl+←/→  Materials " + (matPage + 1) + "/" + matPageCount, screenH);
         }
         // === RENDER CRAFT HINTS ===
         if (!hints.isEmpty()) {
@@ -579,14 +653,15 @@ public class GatherHud {
     private static HudModel buildHudModel(Minecraft minecraft, GatherState state, long now) {
         List<GatherList> lists = new ArrayList<>(state.getLists());
         boolean countChests = GatherSettings.get().countChests;
-        java.util.function.Function<String, Integer> totalCounter = id -> {
-            Item it = BuiltInRegistries.ITEM.getValue(Identifier.parse(id));
+        Map<String, Integer> totalCountCache = new HashMap<>();
+        java.util.function.Function<String, Integer> totalCounter = id -> totalCountCache.computeIfAbsent(id, key -> {
+            Item it = ITEM_ID_CACHE.computeIfAbsent(key, k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
             int inInv = it == null ? 0 : countInventoryTagAware(minecraft, it);
-            int inChests = countChests ? state.getTrackedChestCountMatching(id) : 0;
-            int inManual = countChests ? 0 : state.getManualChestCountMatching(id);
-            int inCollectors = state.getCollectorChestCountMatching(id);
+            int inChests = countChests ? state.getTrackedChestCountMatching(key) : 0;
+            int inManual = countChests ? 0 : state.getManualChestCountMatching(key);
+            int inCollectors = state.getCollectorChestCountMatching(key);
             return inInv + inChests + inManual + inCollectors;
-        };
+        });
 
         List<List<GatherState.RootInfo>> rootsPerList = new ArrayList<>();
         for (int li = 0; li < lists.size(); li++) {
@@ -700,6 +775,88 @@ public class GatherHud {
                 List.copyOf(matEntries), List.copyOf(hints));
     }
 
+    private static int pageCountGoals(List<GoalEntry> entries, int pageH) {
+        if (entries.isEmpty()) return 1;
+        int pages = 1;
+        int used = 0;
+        for (GoalEntry entry : entries) {
+            int h = goalEntryHeight(entry);
+            if (used > 0 && used + h > pageH) {
+                pages++;
+                used = 0;
+            }
+            used += h;
+        }
+        return pages;
+    }
+
+    private static int goalPageStart(List<GoalEntry> entries, int page, int pageH) {
+        int currentPage = 0;
+        int used = 0;
+        for (int i = 0; i < entries.size(); i++) {
+            int h = goalEntryHeight(entries.get(i));
+            if (used > 0 && used + h > pageH) {
+                currentPage++;
+                used = 0;
+                if (currentPage == page) return i;
+            }
+            used += h;
+        }
+        return 0;
+    }
+
+    private static int goalEntryHeight(GoalEntry entry) {
+        return entry.header() ? LABEL_H : ROW_H_GOAL;
+    }
+
+    private static List<GoalPage> buildGoalPages(List<GoalEntry> entries, int pageH) {
+        if (entries.isEmpty()) return List.of();
+        List<GoalPage> pages = new ArrayList<>();
+        int rowsPerPage = Math.max(1, (pageH - LABEL_H) / ROW_H_GOAL);
+        for (int i = 0; i < entries.size(); i++) {
+            GoalEntry header = entries.get(i);
+            if (!header.header()) continue;
+            int listIndex = header.listIndex();
+            int start = i + 1;
+            int end = start;
+            while (end < entries.size() && !entries.get(end).header()) end++;
+            int rowCount = end - start;
+            if (rowCount <= 0) continue;
+            int parts = Math.max(1, (int) Math.ceil(rowCount / (double) rowsPerPage));
+            for (int part = 0; part < parts; part++) {
+                int pageStart = start + part * rowsPerPage;
+                int pageEnd = Math.min(end, pageStart + rowsPerPage);
+                pages.add(new GoalPage(listIndex, pageStart, pageEnd, part + 1, parts));
+            }
+        }
+        return pages;
+    }
+
+    private static void drawColumnPageHint(GuiGraphicsExtractor context, Minecraft minecraft, int columnX, int columnBottomY, int columnW, String label, int screenH) {
+        int tw = minecraft.font.width(label);
+        int x = Math.max(0, columnX + (columnW - tw - 12) / 2);
+        int y = Math.min(Math.max(0, screenH - 32), columnBottomY + 1);
+        GatherTheme.drawNineSlice(context, GatherTheme.HUD_MORE_ROW, x, y, tw + 12, 10);
+        context.text(minecraft.font, Component.literal(label), x + 6, y + 1, 0xFFFFCC66);
+    }
+
+    private static int currentGuiScale(Minecraft minecraft) {
+        Integer value = minecraft.options.guiScale().get();
+        return value == null ? 0 : value;
+    }
+
+    private static String trimToWidth(Minecraft minecraft, String text, int maxW) {
+        if (minecraft.font.width(text) <= maxW) return text;
+        int ellipsisW = minecraft.font.width("...");
+        return minecraft.font.plainSubstrByWidth(text, Math.max(1, maxW - ellipsisW)) + "...";
+    }
+
+    private static void drawPageIndicator(GuiGraphicsExtractor context, Minecraft minecraft, int x, int y, int width, int page, int pageCount) {
+        String label = (page + 1) + "/" + pageCount;
+        int tw = minecraft.font.width(label);
+        context.text(minecraft.font, Component.literal(label), x + width - tw - 2, y + 2, 0xFFFFCC66);
+    }
+
     private static float materialAlpha(MatEntry entry, long now) {
         if (entry.completionStartMs() == 0) {
             return Math.min(1f, (float) (now - entry.firstSeenMs()) / FADE_IN_MS);
@@ -780,6 +937,37 @@ public class GatherHud {
             return itemPath.substring(0, itemPath.length() - 1) + "ies";
         }
         return itemPath + "s";
+    }
+
+    private static void ensureLayoutBaseSize(GatherSettings settings, int screenW, int screenH) {
+        if (settings.layoutBaseScreenW > 0 && settings.layoutBaseScreenH > 0) return;
+        settings.layoutBaseScreenW = screenW;
+        settings.layoutBaseScreenH = screenH;
+        settings.save();
+    }
+
+    private static int scaleLayoutX(int value, int baseW, int screenW) {
+        if (value < 0) return value;
+        return Math.round(value * (screenW / (float) Math.max(1, baseW)));
+    }
+
+    private static int scaleLayoutY(int value, int baseH, int screenH) {
+        if (value < 0) return value;
+        return Math.round(value * (screenH / (float) Math.max(1, baseH)));
+    }
+
+    private static int scaleLayoutW(int value, int baseW, int screenW) {
+        if (value < 0) return value;
+        return value;
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static int clampToScreenX(int x, int width, int screenW) {
+        if (x < 0) return x;
+        return clamp(x, 0, Math.max(0, screenW - width - 4));
     }
 
     private static boolean isVowel(char c) {

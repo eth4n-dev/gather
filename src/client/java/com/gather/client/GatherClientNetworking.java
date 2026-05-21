@@ -58,7 +58,7 @@ public class GatherClientNetworking {
 
         ClientPlayNetworking.registerGlobalReceiver(BreakdownResultPayload.ID, (payload, context) -> {
             context.client().execute(() -> {
-                GatherState.get().cacheBreakdown(payload.originItemId(), payload.ingredients(), payload.inventoryCraftable());
+                GatherState.get().cacheBreakdown(payload.originItemId(), payload.entries(), payload.inventoryCraftable());
                 Consumer<BreakdownResultPayload> cb = pendingCallbacks.remove(payload.originItemId());
                 if (cb != null) cb.accept(payload);
             });

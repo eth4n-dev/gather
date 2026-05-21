@@ -43,6 +43,8 @@ public class GatherCraftingOverlay {
     private record CraftEntry(String itemId, ItemStack stack, List<Integer> indices) {}
     private static final Map<String, Item> ITEM_ID_CACHE = new HashMap<>();
     private static final Map<Item, Set<TagKey<Item>>> ITEM_TAG_CACHE = new HashMap<>();
+    private static final Map<String, Integer> COUNT_FOR_ID_CACHE = new HashMap<>();
+    private static final Map<Item, Map<Item, Integer>> INVENTORY_BY_TYPE_CACHE = new HashMap<>();
     private static long lastCraftCacheMs = 0;
     private static List<CraftEntry> craftCache = List.of();
     private static int panelScroll = 0;
@@ -71,7 +73,7 @@ public class GatherCraftingOverlay {
                 }
                 renderOverlay((CraftingScreen) s, ctx, mx, my);
                 if (hoveredLines != null) {
-                    ctx.setComponentTooltipForNextFrame(client.font, hoveredLines, tooltipX, tooltipY);
+                    drawHoverTooltip(ctx, client, hoveredLines, tooltipX, tooltipY);
                 }
             });
 
@@ -151,22 +153,36 @@ public class GatherCraftingOverlay {
 
             int stillNeed = 0;
             int maxCraft = 0;
+            boolean inChest = false;
             for (int idx : ce.indices()) {
                 if (idx >= nodes.size()) continue;
                 stillNeed += Math.max(0, nodes.get(idx).needed - effectiveHave(nodes.get(idx)));
                 maxCraft  += computeMaxCraftableChained(idx, nodes.get(idx), nodes);
+                if (!inChest) inChest = hasAnyIngredientInChest(idx, nodes.get(idx), nodes);
             }
             ctx.text(client.font,
                     Component.literal("need " + stillNeed + "  max " + maxCraft),
                     panelX + 33, rowY + 15, skin.secondaryTextColor, false);
 
+            int chestIconX = panelX + PANEL_W - 30;
+            int chestIconY = rowY + 5;
+            if (inChest) {
+                ItemStack cs = getChestStack();
+                if (!cs.isEmpty()) ctx.item(cs, chestIconX, chestIconY);
+            }
+
+            boolean onChestIcon = inChest && mx >= chestIconX;
             if (rowHov) {
                 ctx.requestCursor(CursorTypes.POINTING_HAND);
-                hoveredLines = List.of(
-                        Component.literal("Click to craft"),
-                        Component.literal("Left click: craft needed (" + stillNeed + ")"),
-                        Component.literal("Right click: craft all possible (" + maxCraft + ")")
-                );
+                List<Component> lines = new ArrayList<>();
+                if (onChestIcon) {
+                    lines.add(Component.literal("Some ingredients are in a chest").withColor(0xFFFFAA33));
+                    lines.add(Component.literal("Click to highlight in world").withColor(0xFFAA8833));
+                } else {
+                    lines.add(Component.literal("Left click: craft needed (" + stillNeed + ")"));
+                    lines.add(Component.literal("Right click: craft all possible (" + maxCraft + ")"));
+                }
+                hoveredLines = lines;
                 tooltipX = mx;
                 tooltipY = my;
             }
@@ -217,12 +233,31 @@ public class GatherCraftingOverlay {
 
         List<ListNode> nodes = GatherState.get().getNodes();
         CraftEntry ce = craftCache.get(row + panelScroll);
+
+        if (button == 0 && mx >= panelX + PANEL_W - 30) {
+            String missingId = findFirstChestIngredient(ce, nodes);
+            if (missingId != null) {
+                String cur = GatherState.get().getChestFinderItemId();
+                boolean nowTracking = !missingId.equals(cur);
+                GatherState.get().setChestFinderItemId(nowTracking ? missingId : null);
+                playClickSound();
+                if (nowTracking) {
+                    GatherHud.showToast("Tracking chest");
+                    Minecraft client = Minecraft.getInstance();
+                    if (client != null) client.setScreen(null);
+                }
+                return;
+            }
+        }
+
+        boolean anyFailed = false;
         for (int idx : ce.indices()) {
             if (idx >= nodes.size()) continue;
             ListNode node = nodes.get(idx);
-            if (button == 1) doChainCraftMax(idx, node);
-            else doChainCraft(idx, node);
+            boolean ok = button == 1 ? doChainCraftMax(idx, node) : doChainCraft(idx, node);
+            if (!ok) anyFailed = true;
         }
+        if (anyFailed) playRejectSound();
     }
 
     private static void handleScroll(CraftingScreen screen, int mx, int my, double verticalAmount) {
@@ -307,6 +342,34 @@ public class GatherCraftingOverlay {
         GatherTheme.drawNineSlice(ctx, hovered ? GatherTheme.CRAFT_ROW_HOVER : GatherTheme.CRAFT_ROW, x, y, w, h);
     }
 
+    private static void drawHoverTooltip(GuiGraphicsExtractor ctx, Minecraft client, List<Component> lines, int mx, int my) {
+        if (lines.isEmpty()) return;
+        int textW = 0;
+        for (Component c : lines) textW = Math.max(textW, client.font.width(c));
+        int lineH = client.font.lineHeight + 2;
+        int boxW = textW + 8;
+        int boxH = lines.size() * lineH + 6;
+        int bx = mx - boxW - 6;
+        int by = my - boxH / 2;
+        int sw = client.getWindow().getGuiScaledWidth();
+        int sh = client.getWindow().getGuiScaledHeight();
+        if (bx < 2) bx = mx + 6;
+        if (by < 2) by = 2;
+        if (by + boxH > sh - 2) by = sh - boxH - 2;
+        if (bx + boxW > sw - 2) bx = sw - boxW - 2;
+        ctx.fill(bx - 1, by - 1, bx + boxW + 1, by + boxH + 1, 0xFF0A0A0A);
+        ctx.fill(bx, by, bx + boxW, by + boxH, 0xFF1A1A2E);
+        int ty = by + 4;
+        for (Component c : lines) {
+            if (c.getString().isEmpty()) {
+                ty += lineH / 2;
+                continue;
+            }
+            ctx.text(client.font, c, bx + 4, ty, 0xFFFFFFFF, false);
+            ty += lineH;
+        }
+    }
+
     private static void renderItemSlot(GuiGraphicsExtractor ctx, int x, int y, Skin skin) {
         GatherTheme.draw(ctx, GatherTheme.CRAFT_ITEM_SLOT, x, y);
     }
@@ -319,6 +382,13 @@ public class GatherCraftingOverlay {
         Minecraft client = Minecraft.getInstance();
         if (client != null) {
             client.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
+        }
+    }
+
+    private static void playRejectSound() {
+        Minecraft client = Minecraft.getInstance();
+        if (client != null) {
+            client.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.CHEST_LOCKED, 1.0F));
         }
     }
 
@@ -377,6 +447,7 @@ public class GatherCraftingOverlay {
     }
 
     private static List<CraftEntry> buildQuickCraftList() {
+        clearCountCaches();
         List<ListNode> nodes = GatherState.get().getNodes();
 
         // Compute effective still-needed per node, accounting for current inventory
@@ -527,24 +598,26 @@ public class GatherCraftingOverlay {
         return computeMaxCraftableChained(ni, node, nodes) >= 1;
     }
 
-    private static void doChainCraft(int ni, ListNode node) {
+    private static boolean doChainCraft(int ni, ListNode node) {
+        clearCountCaches();
         List<ListNode> nodes = GatherState.get().getNodes();
         int stillNeed = Math.max(0, node.needed - effectiveHave(node));
-        if (stillNeed == 0) return;
+        if (stillNeed == 0) return true;
         int maxChain = computeMaxCraftableChained(ni, node, nodes);
-        if (maxChain <= 0) return;
-        doChainCraftInternal(ni, node, nodes, Math.min(stillNeed, maxChain), new HashMap<>());
+        if (maxChain <= 0) return true;
+        return doChainCraftInternal(ni, node, nodes, Math.min(stillNeed, maxChain), new HashMap<>());
     }
 
-    private static void doChainCraftMax(int ni, ListNode node) {
+    private static boolean doChainCraftMax(int ni, ListNode node) {
+        clearCountCaches();
         List<ListNode> nodes = GatherState.get().getNodes();
         int maxChain = computeMaxCraftableChained(ni, node, nodes);
-        if (maxChain <= 0) return;
-        doChainCraftInternal(ni, node, nodes, maxChain, new HashMap<>());
+        if (maxChain <= 0) return true;
+        return doChainCraftInternal(ni, node, nodes, maxChain, new HashMap<>());
     }
 
-    private static void doChainCraftInternal(int ni, ListNode node, List<ListNode> nodes, int outputCount,
-                                             Map<String, Integer> virtualInv) {
+    private static boolean doChainCraftInternal(int ni, ListNode node, List<ListNode> nodes, int outputCount,
+                                                Map<String, Integer> virtualInv) {
         for (int j = ni + 1; j < nodes.size(); j++) {
             ListNode child = nodes.get(j);
             if (child.depth <= node.depth) break;
@@ -553,7 +626,7 @@ public class GatherCraftingOverlay {
             int have = countForId(child.itemId) + virtualInv.getOrDefault(child.itemId, 0);
             int toMake = Math.max(0, ingNeeded - have);
             if (toMake > 0 && child.broken) {
-                doChainCraftInternal(j, child, nodes, toMake, virtualInv);
+                if (!doChainCraftInternal(j, child, nodes, toMake, virtualInv)) return false;
                 virtualInv.merge(child.itemId, toMake, Integer::sum);
             }
         }
@@ -581,9 +654,11 @@ public class GatherCraftingOverlay {
                             BuiltInRegistries.ITEM.getKey(e.getKey()).toString(), use));
                     rem -= use;
                 }
+                if (rem > 0) return false; // ingredient only in chest — can't consume
             }
         }
         GatherClientNetworking.sendAutoCraft(node.itemId, outputCount, consume);
+        return true;
     }
 
     private static int effectiveHave(ListNode node) {
@@ -592,14 +667,20 @@ public class GatherCraftingOverlay {
     }
 
     private static int countForId(String itemId) {
+        Integer cached = COUNT_FOR_ID_CACHE.get(itemId);
+        if (cached != null) return cached;
         Item it = ITEM_ID_CACHE.computeIfAbsent(itemId, k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
         if (it == null) return 0;
         int inv = 0;
         for (int c : countInventoryByType(it).values()) inv += c;
-        return inv + (GatherSettings.get().countChests ? GatherState.get().getTrackedChestCountMatching(itemId) : 0);
+        int count = inv + (GatherSettings.get().countChests ? GatherState.get().getTrackedChestCountMatching(itemId) : 0);
+        COUNT_FOR_ID_CACHE.put(itemId, count);
+        return count;
     }
 
     private static Map<Item, Integer> countInventoryByType(Item neededItem) {
+        Map<Item, Integer> cached = INVENTORY_BY_TYPE_CACHE.get(neededItem);
+        if (cached != null) return cached;
         Minecraft client = Minecraft.getInstance();
         if (client == null || client.player == null) return Map.of();
         Set<TagKey<Item>> tags = ITEM_TAG_CACHE.computeIfAbsent(neededItem,
@@ -626,6 +707,62 @@ public class GatherCraftingOverlay {
                 }
             }
         }
+        INVENTORY_BY_TYPE_CACHE.put(neededItem, result);
         return result;
+    }
+
+    private static void clearCountCaches() {
+        COUNT_FOR_ID_CACHE.clear();
+        INVENTORY_BY_TYPE_CACHE.clear();
+    }
+
+    private static boolean hasAnyIngredientInChest(int ni, ListNode node, List<ListNode> nodes) {
+        if (!GatherSettings.get().countChests) return false;
+        for (int j = ni + 1; j < nodes.size(); j++) {
+            ListNode child = nodes.get(j);
+            if (child.depth <= node.depth) break;
+            if (child.depth != node.depth + 1 || child.needed <= 0) continue;
+            Item childItem = ITEM_ID_CACHE.computeIfAbsent(child.itemId, k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
+            int inInv = 0;
+            for (int c : countInventoryByType(childItem).values()) inInv += c;
+            if (countForId(child.itemId) > inInv) return true;
+            if (child.broken && hasAnyIngredientInChest(j, child, nodes)) return true;
+        }
+        return false;
+    }
+
+    private static ItemStack chestStack = null;
+    private static ItemStack getChestStack() {
+        if (chestStack == null || chestStack.isEmpty()) {
+            Item c = BuiltInRegistries.ITEM.getValue(Identifier.parse("minecraft:chest"));
+            chestStack = c != null ? c.getDefaultInstance() : ItemStack.EMPTY;
+        }
+        return chestStack;
+    }
+
+    private static String findFirstChestIngredient(CraftEntry ce, List<ListNode> nodes) {
+        for (int idx : ce.indices()) {
+            if (idx >= nodes.size()) continue;
+            String found = findFirstChestIngredientInTree(idx, nodes.get(idx), nodes);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static String findFirstChestIngredientInTree(int ni, ListNode node, List<ListNode> nodes) {
+        for (int j = ni + 1; j < nodes.size(); j++) {
+            ListNode child = nodes.get(j);
+            if (child.depth <= node.depth) break;
+            if (child.depth != node.depth + 1 || child.needed <= 0) continue;
+            Item childItem = ITEM_ID_CACHE.computeIfAbsent(child.itemId, k -> BuiltInRegistries.ITEM.getValue(Identifier.parse(k)));
+            int inInv = 0;
+            for (int c : countInventoryByType(childItem).values()) inInv += c;
+            if (countForId(child.itemId) > inInv) return child.itemId;
+            if (child.broken) {
+                String found = findFirstChestIngredientInTree(j, child, nodes);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 }

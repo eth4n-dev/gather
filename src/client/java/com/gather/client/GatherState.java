@@ -3,6 +3,7 @@ package com.gather.client;
 import com.google.gson.*;
 import com.google.gson.reflect.TypeToken;
 import net.fabricmc.loader.api.FabricLoader;
+import com.gather.network.BreakdownEntry;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -28,6 +29,9 @@ public class GatherState {
     static boolean isSameWoodFamily(String idA, String idB) {
         String a = idA.contains(":") ? idA.substring(idA.indexOf(':') + 1) : idA;
         String b = idB.contains(":") ? idB.substring(idB.indexOf(':') + 1) : idB;
+        // Stripped variants are interchangeable with their unstripped counterparts
+        if (a.startsWith("stripped_")) a = a.substring("stripped_".length());
+        if (b.startsWith("stripped_")) b = b.substring("stripped_".length());
         for (String prefix : WOOD_PREFIXES) {
             if (a.startsWith(prefix + "_")) {
                 String suffix = a.substring(prefix.length());
@@ -80,6 +84,12 @@ public class GatherState {
     public static void setServerXrayAllowed(boolean v) { serverXrayAllowed = v; }
 
     private static final int MAX_LISTS = 10;
+
+    private static final Set<String> DEFAULT_COLLAPSED_ITEMS = Set.of("minecraft:leather");
+    private static boolean isEffectiveLeaf(ListNode node) { return !node.broken || node.childrenDisabled; }
+    private static String displayId(ListNode node) {
+        return node.hasAlternatives() ? node.alternatives.get(node.selectedAlt) : node.itemId;
+    }
 
     // ─── WORLD MANAGEMENT ────────────────────────────────────────────────────
 
@@ -201,7 +211,7 @@ public class GatherState {
     private int activeListIndex               = 0;   // which list the Add tab targets
     private int lastAddedListIndex            = 0;   // default for the picker overlay
     private Map<String, Integer> chestCounts  = new HashMap<>();
-    private Map<String, Map<String, Integer>> breakdownCache        = new HashMap<>();
+    private Map<String, List<BreakdownEntry>> breakdownCache        = new HashMap<>();
     private Map<String, Boolean>              inventoryCraftableCache = new HashMap<>();
     private Set<String> hiddenBaseMaterials = new LinkedHashSet<>();
 
@@ -245,7 +255,7 @@ public class GatherState {
                 if (node.itemId.equals(rootItemId)) { inRoot = true; continue; }
                 if (inRoot) break;
             }
-            if (inRoot && !node.broken) result.add(node.itemId);
+            if (inRoot && isEffectiveLeaf(node)) result.add(displayId(node));
         }
         return result;
     }
@@ -326,6 +336,26 @@ public class GatherState {
         save(); syncGoals(list);
     }
 
+    public void addAnyWoodItem(int listIndex, String canonicalId, int count, int baseline,
+                               List<String> variants, String displayName) {
+        if (listIndex < 0 || listIndex >= lists.size()) return;
+        GatherList list = lists.get(listIndex);
+        lastAddedListIndex = listIndex;
+        for (ListNode n : list.nodes) {
+            if (n.depth == 0 && n.anyWoodType && n.itemId.equals(canonicalId)) {
+                n.needed += count;
+                save(); syncGoals(list); return;
+            }
+        }
+        ListNode node = new ListNode(canonicalId, count, 0);
+        node.baseline       = baseline;
+        node.anyWoodType    = true;
+        node.woodVariants   = variants;
+        node.woodDisplayName = displayName;
+        list.nodes.add(node);
+        save(); syncGoals(list);
+    }
+
     public void removeNode(int listIndex, int index) {
         if (listIndex < 0 || listIndex >= lists.size()) return;
         GatherList list = lists.get(listIndex);
@@ -351,7 +381,7 @@ public class GatherState {
     }
 
     public void insertBreakdown(int listIndex, int index,
-                                Map<String, Integer> ingredients, boolean inventoryCraftable) {
+                                List<BreakdownEntry> entries, boolean inventoryCraftable) {
         if (listIndex < 0 || listIndex >= lists.size()) return;
         List<ListNode> nodes = lists.get(listIndex).nodes;
         if (index < 0 || index >= nodes.size()) return;
@@ -361,8 +391,8 @@ public class GatherState {
         while (end < nodes.size() && nodes.get(end).depth > parent.depth) end++;
         nodes.subList(index + 1, end).clear();
 
-        if (ingredients == null || ingredients.isEmpty()
-                || (ingredients.size() == 1 && ingredients.containsKey(parent.itemId))) {
+        if (entries == null || entries.isEmpty()
+                || (entries.size() == 1 && entries.get(0).isSingle() && entries.get(0).primary().equals(parent.itemId))) {
             parent.broken = false;
             parent.inventoryCraftable = false;
             save(); syncGoals(lists.get(listIndex));
@@ -371,10 +401,15 @@ public class GatherState {
 
         int childDepth = parent.depth + 1;
         parent.broken = true;
+        parent.collapsed = true;
+        parent.childrenDisabled = DEFAULT_COLLAPSED_ITEMS.contains(parent.itemId);
         parent.inventoryCraftable = inventoryCraftable;
         int insertAt = index + 1;
-        for (Map.Entry<String, Integer> e : ingredients.entrySet()) {
-            nodes.add(insertAt++, new ListNode(e.getKey(), e.getValue(), childDepth));
+        for (BreakdownEntry e : entries) {
+            ListNode child = new ListNode(e.primary(), e.count(), childDepth);
+            if (!e.isSingle()) child.alternatives = new java.util.ArrayList<>(e.itemIds());
+            child.collapsed = true;
+            nodes.add(insertAt++, child);
         }
         save(); syncGoals(lists.get(listIndex));
     }
@@ -407,11 +442,29 @@ public class GatherState {
         save(); syncGoals(lists.get(toList));
     }
 
+    public void setSelectedAlt(int listIndex, int index, int altIndex) {
+        if (listIndex < 0 || listIndex >= lists.size()) return;
+        List<ListNode> nodes = lists.get(listIndex).nodes;
+        if (index < 0 || index >= nodes.size()) return;
+        ListNode node = nodes.get(index);
+        if (!node.hasAlternatives()) return;
+        node.selectedAlt = Math.max(0, Math.min(altIndex, node.alternatives.size() - 1));
+        save();
+    }
+
     public void setCollapsed(int listIndex, int index, boolean collapsed) {
         if (listIndex < 0 || listIndex >= lists.size()) return;
         List<ListNode> nodes = lists.get(listIndex).nodes;
         if (index < 0 || index >= nodes.size()) return;
         nodes.get(index).collapsed = collapsed;
+        save();
+    }
+
+    public void setChildrenDisabled(int listIndex, int nodeIndex, boolean disabled) {
+        if (listIndex < 0 || listIndex >= lists.size()) return;
+        List<ListNode> nodes = lists.get(listIndex).nodes;
+        if (nodeIndex < 0 || nodeIndex >= nodes.size()) return;
+        nodes.get(nodeIndex).childrenDisabled = disabled;
         save();
     }
 
@@ -507,7 +560,7 @@ public class GatherState {
         Map<String, Integer> result = new LinkedHashMap<>();
         if (listIndex < 0 || listIndex >= lists.size()) return result;
         for (ListNode n : lists.get(listIndex).nodes) {
-            if (!n.broken) result.merge(n.itemId, n.needed, Integer::sum);
+            if (isEffectiveLeaf(n)) result.merge(displayId(n), n.needed, Integer::sum);
         }
         return result;
     }
@@ -524,8 +577,8 @@ public class GatherState {
         List<ListNode> nodes = lists.get(listIndex).nodes;
         NeededState neededState = computeNeededState(nodes, inventoryCounter);
         for (int ni = 0; ni < nodes.size(); ni++) {
-            if (!nodes.get(ni).broken && neededState.effectiveNeeded[ni] > 0) {
-                result.merge(nodes.get(ni).itemId, neededState.effectiveNeeded[ni], Integer::sum);
+            if (isEffectiveLeaf(nodes.get(ni)) && neededState.effectiveNeeded[ni] > 0) {
+                result.merge(displayId(nodes.get(ni)), neededState.effectiveNeeded[ni], Integer::sum);
             }
         }
         return result;
@@ -551,9 +604,10 @@ public class GatherState {
             // Keep showing leaf nodes while any base material is still missing anywhere in the list.
             // Use rawNeeded as the stable target so the denominator does not shrink with inventory changes.
             for (int ni = 0; ni < nodes.size(); ni++) {
-                if (effNeeded[ni] > 0 && !nodes.get(ni).broken) {
-                    if (isBaseMaterialHidden(nodes.get(ni).itemId)) continue;
-                    result.merge(nodes.get(ni).itemId, rawNeeded[ni], Integer::sum);
+                if (effNeeded[ni] > 0 && isEffectiveLeaf(nodes.get(ni))) {
+                    ListNode _n = nodes.get(ni);
+                    if (isBaseMaterialHidden(_n.itemId)) continue;
+                    result.merge(displayId(_n), rawNeeded[ni], Integer::sum);
                 }
             }
             return result;
@@ -564,7 +618,7 @@ public class GatherState {
         for (int ni = 0; ni < nodes.size(); ni++) {
             if (effNeeded[ni] == 0) continue;
             ListNode node = nodes.get(ni);
-            if (!node.broken) continue;
+            if (!node.broken || node.childrenDisabled) continue;
             boolean childrenReady = true;
             for (int j = ni + 1; j < nodes.size(); j++) {
                 ListNode child = nodes.get(j);
@@ -608,7 +662,7 @@ public class GatherState {
             if (root.depth != 0) continue;
             if (isBaseMaterialHidden(root.itemId)) continue;
 
-            if (!root.broken) {
+            if (isEffectiveLeaf(root)) {
                 int have = counter.apply(root.itemId);
                 int effHave = Math.max(0, have - root.baseline);
                 float progress = raw[ni] > 0 ? Math.min(1f, (float) effHave / raw[ni]) : 1f;
@@ -622,14 +676,14 @@ public class GatherState {
                 for (int j = ni + 1; j < nodes.size(); j++) {
                     ListNode child = nodes.get(j);
                     if (child.depth == 0) break;
-                    if (!child.broken) {
+                    if (isEffectiveLeaf(child)) {
                         hasLeaf = true;
                         leafRawTotal += raw[j];
-                        leafHaveTotal += Math.min(raw[j], counter.apply(child.itemId));
+                        leafHaveTotal += Math.min(raw[j], haveForNode(child, counter));
                         if (eff[j] > 0) allLeavesCovered = false;
 
                         hasLeafForCraftable = true;
-                        int have = counter.apply(child.itemId);
+                        int have = haveForNode(child, counter);
                         if (root.needed > 0 && child.needed > 0) {
                             craftableNow = Math.min(craftableNow, (have * root.needed) / child.needed);
                         }
@@ -663,9 +717,10 @@ public class GatherState {
         List<ListNode> nodes = lists.get(listIndex).nodes;
         NeededState ns = computeNeededState(nodes, counter);
         for (int ni = 0; ni < nodes.size(); ni++) {
-            if (nodes.get(ni).depth > 0 && !nodes.get(ni).broken && ns.rawNeeded()[ni] > 0) {
-                if (!includeHidden && isBaseMaterialHidden(nodes.get(ni).itemId)) continue;
-                result.merge(nodes.get(ni).itemId, ns.rawNeeded()[ni], Integer::sum);
+            if (nodes.get(ni).depth > 0 && isEffectiveLeaf(nodes.get(ni)) && ns.rawNeeded()[ni] > 0) {
+                ListNode _n = nodes.get(ni);
+                if (!includeHidden && isBaseMaterialHidden(_n.itemId)) continue;
+                result.merge(displayId(_n), ns.rawNeeded()[ni], Integer::sum);
             }
         }
         return result;
@@ -713,14 +768,14 @@ public class GatherState {
 
         for (int ni = 0; ni < nodes.size(); ni++) {
             ListNode root = nodes.get(ni);
-            if (root.depth != 0 || !root.broken || effNeeded[ni] == 0) continue;
+            if (root.depth != 0 || !root.broken || root.childrenDisabled || effNeeded[ni] == 0) continue;
 
             boolean hasLeaf = false;
             boolean leavesCovered = true;
             for (int j = ni + 1; j < nodes.size(); j++) {
                 ListNode child = nodes.get(j);
                 if (child.depth <= root.depth) break;
-                if (!child.broken) {
+                if (isEffectiveLeaf(child)) {
                     hasLeaf = true;
                     if (effNeeded[j] > 0) {
                         leavesCovered = false;
@@ -735,16 +790,31 @@ public class GatherState {
         return ready;
     }
 
+    private static int haveForNode(ListNode node, Function<String, Integer> counter) {
+        if (!node.hasAlternatives()) return counter.apply(node.itemId);
+        int total = 0;
+        for (String alt : node.alternatives) total += counter.apply(alt);
+        return total;
+    }
+
     private NeededState computeNeededState(List<ListNode> nodes,
                                            java.util.function.Function<String, Integer> counter) {
         int[] rawNeeded = new int[nodes.size()];
         int[] effectiveNeeded = new int[nodes.size()];
         int[] latestIndexByDepth = new int[Math.max(1, maxDepth(nodes) + 1)];
         Arrays.fill(latestIndexByDepth, -1);
+        java.util.Deque<Integer> disableStack = new java.util.ArrayDeque<>();
 
         for (int ni = 0; ni < nodes.size(); ni++) {
             ListNode node = nodes.get(ni);
-            int have = counter.apply(node.itemId);
+            while (!disableStack.isEmpty() && node.depth <= disableStack.peek()) disableStack.pop();
+            if (!disableStack.isEmpty()) {
+                rawNeeded[ni] = 0;
+                effectiveNeeded[ni] = 0;
+                continue;
+            }
+
+            int have = haveForNode(node, counter);
 
             if (node.depth == 0) {
                 rawNeeded[ni] = node.needed;
@@ -766,6 +836,7 @@ public class GatherState {
             for (int depth = node.depth + 1; depth < latestIndexByDepth.length; depth++) {
                 latestIndexByDepth[depth] = -1;
             }
+            if (node.broken && node.childrenDisabled) disableStack.push(node.depth);
         }
 
         return new NeededState(rawNeeded, effectiveNeeded);
@@ -779,7 +850,7 @@ public class GatherState {
 
     private boolean hasUnresolvedLeaves(List<ListNode> nodes, int[] effectiveNeeded) {
         for (int ni = 0; ni < nodes.size(); ni++) {
-            if (!nodes.get(ni).broken && effectiveNeeded[ni] > 0) return true;
+            if (isEffectiveLeaf(nodes.get(ni)) && effectiveNeeded[ni] > 0) return true;
         }
         return false;
     }
@@ -907,28 +978,11 @@ public class GatherState {
     public void mergeAutoTrackedChests(List<Long> positions, ClientLevel world, BlockPos center, int radius) {
         Set<Long> found = new LinkedHashSet<>(positions);
         boolean changed = trackedChests.addAll(found);
-        Iterator<Long> iterator = trackedChests.iterator();
-        while (iterator.hasNext()) {
-            long encoded = iterator.next();
-            if (found.contains(encoded)) continue;
-            BlockPos pos = BlockPos.of(encoded);
-            if (!isWithinScanRadius(pos, center, radius)) continue;
-            if (!world.getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) continue;
-            iterator.remove();
-            trackedChestContents.remove(encoded);
-            changed = true;
-        }
         if (changed) {
             rebuildTrackedChestCounts();
             saveTrackedChests();
             saveTrackedChestContents();
         }
-    }
-
-    private static boolean isWithinScanRadius(BlockPos pos, BlockPos center, int radius) {
-        return Math.abs(pos.getX() - center.getX()) <= radius
-                && Math.abs(pos.getY() - center.getY()) <= radius
-                && Math.abs(pos.getZ() - center.getZ()) <= radius;
     }
 
     public void clearTrackedChests() {
@@ -1270,11 +1324,11 @@ public class GatherState {
         } catch (IOException | RuntimeException ignored) {}
     }
 
-    public void cacheBreakdown(String originItemId, Map<String, Integer> ingredients, boolean inventoryCraftable) {
-        breakdownCache.put(originItemId, ingredients);
+    public void cacheBreakdown(String originItemId, List<BreakdownEntry> entries, boolean inventoryCraftable) {
+        breakdownCache.put(originItemId, entries);
         inventoryCraftableCache.put(originItemId, inventoryCraftable);
     }
-    public Map<String, Integer> getCachedBreakdown(String itemId)       { return breakdownCache.get(itemId); }
+    public List<BreakdownEntry> getCachedBreakdown(String itemId) { return breakdownCache.get(itemId); }
     public boolean getCachedInventoryCraftable(String itemId)            { return inventoryCraftableCache.getOrDefault(itemId, false); }
     public boolean hasCachedInventoryCraftable(String itemId)            { return inventoryCraftableCache.containsKey(itemId); }
 
