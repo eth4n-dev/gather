@@ -1040,14 +1040,15 @@ public class GatherMenuScreen extends Screen {
 
         // Goal Lists section below chest button
         int listY = chestToolsBtnY + TOGGLE_H + gap6;
+        int listBtnY = Math.max(listY + gap24, height - BOTTOM_H - gap24 - TOGGLE_H);
+        int sortY = listY + Math.max(gap10, (listBtnY - listY - SORT_BTN_H) / 2);
         // Sort mode toggle
-        drawCenteredClamped(ctx, "Item sorting:", leftCx, listY, leftW, GatherTheme.textMuted());
-        listY += gap10;
+        drawCenteredClamped(ctx, "Item sorting:", leftCx, sortY - 11, leftW, GatherTheme.textMuted());
         int sortGrpWC = SORT_BTN_W * 2;
         sortBtnAZX   = leftCx - sortGrpWC / 2;
-        sortBtnAZY   = listY;
+        sortBtnAZY   = sortY;
         sortBtnDateX = sortBtnAZX + SORT_BTN_W;
-        sortBtnDateY = listY;
+        sortBtnDateY = sortY;
         boolean azHovC   = mx >= sortBtnAZX   && mx < sortBtnAZX   + SORT_BTN_W && my >= sortBtnAZY && my < sortBtnAZY + SORT_BTN_H;
         boolean dateHovC = mx >= sortBtnDateX && mx < sortBtnDateX + SORT_BTN_W && my >= sortBtnDateY && my < sortBtnDateY + SORT_BTN_H;
         drawMenuButtonFrame(ctx, sortBtnAZX,   sortBtnAZY,   SORT_BTN_W, SORT_BTN_H, azHovC,   goalSortMode == 1, false, false);
@@ -1055,14 +1056,12 @@ public class GatherMenuScreen extends Screen {
         drawThemedText(ctx, Text.literal("A-Z"),  sortBtnAZX   + (SORT_BTN_W - textRenderer.getWidth("A-Z"))  / 2, sortBtnAZY   + (SORT_BTN_H - 8) / 2, goalSortMode == 1 ? GatherTheme.textButton() : GatherTheme.textMuted());
         drawThemedText(ctx, Text.literal("Date"), sortBtnDateX + (SORT_BTN_W - textRenderer.getWidth("Date")) / 2, sortBtnDateY + (SORT_BTN_H - 8) / 2, goalSortMode == 0 ? GatherTheme.textButton() : GatherTheme.textMuted());
         if (azHovC || dateHovC) setClickCursor(ctx);
-        listY += SORT_BTN_H + gap14;
         drawThemedText(ctx, Text.literal("LISTS"),
-                leftCx - textRenderer.getWidth("LISTS") / 2, listY, GatherTheme.textMuted());
-        listY += gap12;
+                leftCx - textRenderer.getWidth("LISTS") / 2, listBtnY - gap12 - 11, GatherTheme.textMuted());
         boolean atCap = GatherState.get().getListCount() >= 10;
         newListBtnW = btnW;
         newListBtnX = Math.max(4, leftCx - btnW / 2);
-        newListBtnY = listY;
+        newListBtnY = listBtnY;
         boolean nlHov = !atCap && mx >= newListBtnX && mx <= newListBtnX + newListBtnW
                 && my >= newListBtnY && my <= newListBtnY + TOGGLE_H;
         if (creatingList && !atCap) {
