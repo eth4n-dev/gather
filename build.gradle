@@ -34,6 +34,7 @@ dependencies {
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
     modCompileOnly "com.terraformersmc:modmenu:17.0.0"
+    modCompileOnly files("../libs/jei/jei-1.21.11-fabric-27.4.0.22.jar")
 }
 
 java {

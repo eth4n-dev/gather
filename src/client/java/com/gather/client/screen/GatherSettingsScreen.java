@@ -144,7 +144,14 @@ public class GatherSettingsScreen extends Screen {
                     .dimensions(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing, pbw, 20)
                     .build());
             addDrawableChild(ButtonWidget
-                    .builder(Text.literal("Theme: Modern"), btn -> {})
+                    .builder(stateText("Updates", GatherSettings.get().updateNotifications && !GatherSettings.get().suppressUpdateNotif), btn -> {
+                        GatherSettings settings = GatherSettings.get();
+                        boolean enabled = !(settings.updateNotifications && !settings.suppressUpdateNotif);
+                        settings.updateNotifications = enabled;
+                        settings.suppressUpdateNotif = !enabled;
+                        settings.save();
+                        btn.setMessage(stateText("Updates", enabled));
+                    })
                     .dimensions(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing * 2, pbw, 20)
                     .build());
         } else {
@@ -168,7 +175,18 @@ public class GatherSettingsScreen extends Screen {
                     .build());
             addDrawableChild(ButtonWidget
                     .builder(Text.literal("Theme: Modern"), btn -> {})
-                    .dimensions(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing, prefPanelWidth - panelPad * 2, 20)
+                    .dimensions(prefColX + panelPad, prefPanelY + cardFirstButtonY + bSpacing, prefButtonW, 20)
+                    .build());
+            addDrawableChild(ButtonWidget
+                    .builder(stateText("Updates", GatherSettings.get().updateNotifications && !GatherSettings.get().suppressUpdateNotif), btn -> {
+                        GatherSettings settings = GatherSettings.get();
+                        boolean enabled = !(settings.updateNotifications && !settings.suppressUpdateNotif);
+                        settings.updateNotifications = enabled;
+                        settings.suppressUpdateNotif = !enabled;
+                        settings.save();
+                        btn.setMessage(stateText("Updates", enabled));
+                    })
+                    .dimensions(prefColX + panelPad + prefButtonW + prefButtonGap, prefPanelY + cardFirstButtonY + bSpacing, prefButtonW, 20)
                     .build());
         }
 

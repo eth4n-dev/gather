@@ -380,7 +380,7 @@ public class GatherNetworking {
         ServerPlayNetworking.registerGlobalReceiver(BreakdownRequestPayload.ID, (payload, context) -> {
             ServerPlayerEntity player = context.player();
             ServerWorld world = (ServerWorld) player.getEntityWorld();
-            Map<String, Integer> result = ServerRecipeBreakdown.breakdown(
+            List<BreakdownEntry> result = ServerRecipeBreakdown.breakdown(
                     payload.itemId(), payload.count(), payload.depth(), world);
             boolean invCraftable = ServerRecipeBreakdown.isInventoryCraftable(payload.itemId(), world);
             ServerPlayNetworking.send(player, new BreakdownResultPayload(payload.itemId(), result, invCraftable));

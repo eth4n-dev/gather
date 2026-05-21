@@ -18,6 +18,20 @@ public final class GatherUi {
         }
     }
 
+    public static void playTextEditSound() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client != null) {
+            client.getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.BLOCK_NOTE_BLOCK_HAT, 1.6F));
+        }
+    }
+
+    public static void playGoalAddedSound() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client != null) {
+            client.getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 1.2F));
+        }
+    }
+
     public static void playMenuOpenSound() {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client != null) {

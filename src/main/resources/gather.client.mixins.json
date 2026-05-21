@@ -7,6 +7,7 @@
     "HandledScreenMixin",
     "InGameHudMixin",
     "ItemEntityMixin",
+    "ScreenKeyMixin",
     "UseBlockMixin",
     "WorldRendererMixin"
   ],
