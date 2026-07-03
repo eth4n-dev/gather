@@ -14,14 +14,6 @@ Use [`1.21.11`](../../tree/1.21.11) for the Minecraft 1.21.11 build line.
 
 Use [`26.1.x`](../../tree/26.1.x) for the Minecraft 26.1.x build line.
 
-## Downloads
-
-Download the build that matches your Minecraft version from Modrinth or GitHub Releases.
-
-## Development
-
-Open the branch matching the Minecraft version you want to work on. Version-specific source, Gradle files, assets, and changelogs live on those branches.
-
 ## License
 
 The source code is licensed under [GPL-3.0-or-later](LICENSE).
